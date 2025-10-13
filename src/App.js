@@ -578,57 +578,113 @@ const FamilyTreeApp = () => {
   const renderPersonCard = (person, index) => {
     const childrenInfo = getChildrenInfo(person.children);
     
-    // NEW RESPONSIVE POSITIONING ALGORITHM
-    // Group people by generation
-    const peopleByGeneration = {};
-    familyData.members.forEach(member => {
-      if (!peopleByGeneration[member.generation]) {
-        peopleByGeneration[member.generation] = [];
-      }
-      peopleByGeneration[member.generation].push(member);
+    // IMPROVED FAMILY-BASED POSITIONING ALGORITHM
+    // First, identify all parents in the previous generation who have children in this generation
+    const parentsInPreviousGen = familyData.members.filter(member => 
+      member.generation === person.generation - 1 && 
+      member.children && member.children.length > 0 &&
+      familyData.members.some(child => 
+        member.children.includes(child.id) && child.generation === person.generation
+      )
+    );
+    
+    // Sort parents by their birth date (or position)
+    parentsInPreviousGen.sort((a, b) => {
+      if (!a.dateOfBirth && !b.dateOfBirth) return 0;
+      if (!a.dateOfBirth) return 1;
+      if (!b.dateOfBirth) return -1;
+      return new Date(a.dateOfBirth) - new Date(b.dateOfBirth);
     });
     
-    // Sort each generation by birth date (oldest first)
-    Object.keys(peopleByGeneration).forEach(generation => {
-      peopleByGeneration[generation].sort((a, b) => {
-        // Handle cases where birth date might not be available
-        if (!a.dateOfBirth && !b.dateOfBirth) return 0;
-        if (!a.dateOfBirth) return 1; // Put people without birth dates at the end
-        if (!b.dateOfBirth) return -1;
+    // Build the generation layout by family groups
+    const generationLayout = [];
+    
+    if (person.generation === 1) {
+      // For root generation, just sort by birth date
+      const rootMembers = familyData.members
+        .filter(member => member.generation === 1)
+        .sort((a, b) => {
+          if (!a.dateOfBirth && !b.dateOfBirth) return 0;
+          if (!a.dateOfBirth) return 1;
+          if (!b.dateOfBirth) return -1;
+          return new Date(a.dateOfBirth) - new Date(b.dateOfBirth);
+        });
+      generationLayout.push(...rootMembers);
+    } else {
+      // For subsequent generations, group children by their parents
+      const processedChildren = new Set();
+      
+      parentsInPreviousGen.forEach(parent => {
+        // Get this parent's children in the current generation
+        const parentChildren = familyData.members
+          .filter(member => 
+            member.generation === person.generation && 
+            member.parentId === parent.id
+          )
+          .sort((a, b) => {
+            // Sort children by birth date (oldest first)
+            if (!a.dateOfBirth && !b.dateOfBirth) return 0;
+            if (!a.dateOfBirth) return 1;
+            if (!b.dateOfBirth) return -1;
+            return new Date(a.dateOfBirth) - new Date(b.dateOfBirth);
+          });
         
-        // Sort by birth date (oldest first)
-        return new Date(a.dateOfBirth) - new Date(b.dateOfBirth);
+        // Add these children to the layout
+        parentChildren.forEach(child => {
+          if (!processedChildren.has(child.id)) {
+            generationLayout.push(child);
+            processedChildren.add(child.id);
+          }
+        });
       });
-    });
+      
+      // Add any remaining members who don't have parents in the previous generation
+      const orphanMembers = familyData.members
+        .filter(member => 
+          member.generation === person.generation && 
+          !processedChildren.has(member.id)
+        )
+        .sort((a, b) => {
+          if (!a.dateOfBirth && !b.dateOfBirth) return 0;
+          if (!a.dateOfBirth) return 1;
+          if (!b.dateOfBirth) return -1;
+          return new Date(a.dateOfBirth) - new Date(b.dateOfBirth);
+        });
+      
+      generationLayout.push(...orphanMembers);
+    }
     
-    // Find this person's position within their sorted generation
-    const generationMembers = peopleByGeneration[person.generation] || [];
-    const positionInGeneration = generationMembers.findIndex(m => m.id === person.id);
-    const totalInGeneration = generationMembers.length;
+    // Find this person's position in the organized layout
+    const positionInGeneration = generationLayout.findIndex(m => m.id === person.id);
+    const totalInGeneration = generationLayout.length;
     
     // Calculate responsive layout for mobile and desktop
     const isMobile = window.innerWidth < 768;
-    const baseWidth = isMobile ? 180 : 240; // Reduced spacing for smaller cards
-    const startX = isMobile ? 20 : 50; // Less margin on mobile
-    const generationY = isMobile ? 80 + person.generation * 240 : 100 + person.generation * 260; // Reduced vertical spacing
+    const cardWidth = isMobile ? 180 : 240;
+    const cardSpacing = isMobile ? 20 : 30; // Spacing between cards
+    const startX = isMobile ? 20 : 50;
+    const generationY = isMobile ? 80 + person.generation * 240 : 100 + person.generation * 260;
+    
+    // Simple horizontal positioning - arrange people in each generation side by side
+    // but keep family groups together and sort children within families by birth date
+    let horizontalPosition;
     
     // Calculate horizontal position based on generation size
-    let horizontalPosition;
     if (totalInGeneration === 1) {
       // Center single person
-      horizontalPosition = isMobile ? startX + 100 : startX + 400;
+      horizontalPosition = isMobile ? startX + 200 : startX + 400;
     } else {
-      // Distribute multiple people evenly
-      const totalWidth = totalInGeneration * baseWidth;
+      // Distribute multiple people evenly across the screen
+      const totalWidth = totalInGeneration * cardWidth;
       const containerWidth = isMobile ? window.innerWidth - 40 : 1400;
       const spacingAdjustment = Math.max(0, (containerWidth - totalWidth) / (totalInGeneration + 1));
-      horizontalPosition = startX + spacingAdjustment + (positionInGeneration * baseWidth);
+      horizontalPosition = startX + spacingAdjustment + (positionInGeneration * (cardWidth + cardSpacing));
     }
 
     // Gender-based styling
     const isMale = person.gender === 'male';
-    const cardWidth = isMobile ? '160px' : '220px'; // Reduced card width
-    const cardHeight = isMobile ? '180px' : '200px'; // Increased card height to fit all content
+    const cardWidthPx = isMobile ? '180px' : '240px'; // Match positioning logic
+    const cardHeight = isMobile ? '200px' : '240px';
 
     return (
       <motion.div
@@ -637,7 +693,7 @@ const FamilyTreeApp = () => {
         style={{
           left: `${horizontalPosition}px`,
           top: `${generationY}px`,
-          width: cardWidth,
+          width: cardWidthPx,
           height: cardHeight,
           zIndex: 10
         }}
@@ -743,56 +799,112 @@ const FamilyTreeApp = () => {
       if (person.parentId) {
         const parent = familyData.members.find(m => m.id === person.parentId);
         if (parent) {
-          // Group people by generation for consistent positioning
-          const peopleByGeneration = {};
-          familyData.members.forEach(member => {
-            if (!peopleByGeneration[member.generation]) {
-              peopleByGeneration[member.generation] = [];
-            }
-            peopleByGeneration[member.generation].push(member);
-          });
-          
-          // Sort each generation by birth date (oldest first)
-          Object.keys(peopleByGeneration).forEach(generation => {
-            peopleByGeneration[generation].sort((a, b) => {
+          // Use the same family-based positioning logic as in renderPersonCard
+          const calculatePositionForPerson = (targetPerson) => {
+            // First, identify all parents in the previous generation who have children in target generation
+            const parentsInPreviousGen = familyData.members.filter(member => 
+              member.generation === targetPerson.generation - 1 && 
+              member.children && member.children.length > 0 &&
+              familyData.members.some(child => 
+                member.children.includes(child.id) && child.generation === targetPerson.generation
+              )
+            );
+            
+            // Sort parents by their birth date
+            parentsInPreviousGen.sort((a, b) => {
               if (!a.dateOfBirth && !b.dateOfBirth) return 0;
               if (!a.dateOfBirth) return 1;
               if (!b.dateOfBirth) return -1;
               return new Date(a.dateOfBirth) - new Date(b.dateOfBirth);
             });
-          });
+            
+            // Build the generation layout by family groups
+            const generationLayout = [];
+            
+            if (targetPerson.generation === 1) {
+              // For root generation, just sort by birth date
+              const rootMembers = familyData.members
+                .filter(member => member.generation === 1)
+                .sort((a, b) => {
+                  if (!a.dateOfBirth && !b.dateOfBirth) return 0;
+                  if (!a.dateOfBirth) return 1;
+                  if (!b.dateOfBirth) return -1;
+                  return new Date(a.dateOfBirth) - new Date(b.dateOfBirth);
+                });
+              generationLayout.push(...rootMembers);
+            } else {
+              // For subsequent generations, group children by their parents
+              const processedChildren = new Set();
+              
+              parentsInPreviousGen.forEach(parent => {
+                // Get this parent's children in the current generation
+                const parentChildren = familyData.members
+                  .filter(member => 
+                    member.generation === targetPerson.generation && 
+                    member.parentId === parent.id
+                  )
+                  .sort((a, b) => {
+                    // Sort children by birth date (oldest first)
+                    if (!a.dateOfBirth && !b.dateOfBirth) return 0;
+                    if (!a.dateOfBirth) return 1;
+                    if (!b.dateOfBirth) return -1;
+                    return new Date(a.dateOfBirth) - new Date(b.dateOfBirth);
+                  });
+                
+                // Add these children to the layout
+                parentChildren.forEach(child => {
+                  if (!processedChildren.has(child.id)) {
+                    generationLayout.push(child);
+                    processedChildren.add(child.id);
+                  }
+                });
+              });
+              
+              // Add any remaining members who don't have parents in the previous generation
+              const orphanMembers = familyData.members
+                .filter(member => 
+                  member.generation === targetPerson.generation && 
+                  !processedChildren.has(member.id)
+                )
+                .sort((a, b) => {
+                  if (!a.dateOfBirth && !b.dateOfBirth) return 0;
+                  if (!a.dateOfBirth) return 1;
+                  if (!b.dateOfBirth) return -1;
+                  return new Date(a.dateOfBirth) - new Date(b.dateOfBirth);
+                });
+              
+              generationLayout.push(...orphanMembers);
+            }
+            
+            // Find position and calculate coordinates
+            const positionInGeneration = generationLayout.findIndex(m => m.id === targetPerson.id);
+            const totalInGeneration = generationLayout.length;
+            
+            const isMobile = window.innerWidth < 768;
+            const cardWidth = isMobile ? 180 : 240;
+            const cardSpacing = isMobile ? 20 : 30;
+            const startX = isMobile ? 20 : 50;
+            
+            let horizontalPosition;
+            if (totalInGeneration === 1) {
+              horizontalPosition = isMobile ? startX + 200 : startX + 400;
+            } else {
+              const totalWidth = totalInGeneration * cardWidth;
+              const containerWidth = isMobile ? window.innerWidth - 40 : 1400;
+              const spacingAdjustment = Math.max(0, (containerWidth - totalWidth) / (totalInGeneration + 1));
+              horizontalPosition = startX + spacingAdjustment + (positionInGeneration * (cardWidth + cardSpacing));
+            }
+            
+            return horizontalPosition;
+          };
           
-          // Calculate parent position
-          const parentGenMembers = peopleByGeneration[parent.generation] || [];
-          const parentPosInGen = parentGenMembers.findIndex(m => m.id === parent.id);
-          const parentTotalInGen = parentGenMembers.length;
+          // Calculate positions for parent and child
+          const isMobile = window.innerWidth < 768;
+          const parentX = calculatePositionForPerson(parent);
+          const parentY = isMobile ? 80 + parent.generation * 240 + 100 : 100 + parent.generation * 260 + 120;
           
-          let parentX;
-          if (parentTotalInGen === 1) {
-            parentX = 50 + 400 + 120; // Center + card center offset
-          } else {
-            const baseWidth = 250;
-            const containerWidth = 1200;
-            const spacingAdjustment = Math.max(0, (containerWidth - (parentTotalInGen * baseWidth)) / (parentTotalInGen + 1));
-            parentX = 50 + spacingAdjustment + (parentPosInGen * baseWidth) + 120; // +120 for card center
-          }
-          const parentY = 100 + parent.generation * 350 + 100; // +100 for card center
-          
-          // Calculate child position
-          const childGenMembers = peopleByGeneration[person.generation] || [];
-          const childPosInGen = childGenMembers.findIndex(m => m.id === person.id);
-          const childTotalInGen = childGenMembers.length;
-          
-          let childX;
-          if (childTotalInGen === 1) {
-            childX = 50 + 400 + 120;
-          } else {
-            const baseWidth = 250;
-            const containerWidth = 1200;
-            const spacingAdjustment = Math.max(0, (containerWidth - (childTotalInGen * baseWidth)) / (childTotalInGen + 1));
-            childX = 50 + spacingAdjustment + (childPosInGen * baseWidth) + 120;
-          }
-          const childY = 100 + person.generation * 350;
+          const childX = calculatePositionForPerson(person);
+          const childY = isMobile ? 80 + person.generation * 240 + 100 : 100 + person.generation * 260 + 120;
 
           return (
             <line
