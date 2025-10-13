@@ -192,23 +192,7 @@ export const familyTreeService = {
     }
   },
 
-  // Check if any admin users exist
-  checkAdminExists: async () => {
-    try {
-      const { data, error } = await supabase
-        .from('admin_users')
-        .select('count(*)')
-        .single();
 
-      if (error) throw error;
-      
-      const hasAdmin = data.count > 0;
-      return { success: true, hasAdmin };
-    } catch (error) {
-      console.error('❌ Error checking admin existence:', error);
-      return { success: false, error: error.message };
-    }
-  },
 
   // Test database connection
   testConnection: async () => {

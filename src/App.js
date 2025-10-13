@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { X, Plus, Edit2, Users, Home, ZoomIn, ZoomOut, Upload, Heart, Star, LogOut, Share2, Save, RefreshCw, Check, Lock, User, Camera } from 'lucide-react';
-import { Dialog, Transition, Switch } from '@headlessui/react';
+import { X, Plus, Edit2, Users, Home, Upload, Heart, Star, LogOut, Save, Check, Lock, User, Camera } from 'lucide-react';
+import { Switch } from '@headlessui/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactCrop from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
@@ -22,7 +22,7 @@ const FamilyTreeApp = () => {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [isSaving, setIsSaving] = useState(false);
+
   const [saveStatus, setSaveStatus] = useState('');
   const [showSurnameEdit, setShowSurnameEdit] = useState(false);
   const [tempSurname, setTempSurname] = useState('');
@@ -451,7 +451,6 @@ const FamilyTreeApp = () => {
       return;
     }
     
-    setIsSaving(true);
     setSaveStatus('Saving...');
     
     const result = await familyTreeService.saveFamilyTree(data);
@@ -461,8 +460,6 @@ const FamilyTreeApp = () => {
     } else {
       setSaveStatus('❌ Save failed');
     }
-    
-    setIsSaving(false);
     
     // Clear status after 3 seconds
     setTimeout(() => setSaveStatus(''), 3000);

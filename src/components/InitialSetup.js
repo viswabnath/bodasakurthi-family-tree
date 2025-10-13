@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { UserPlus, Eye, EyeOff, Lock, Users } from 'lucide-react';
+import { UserPlus, Eye, EyeOff, Users } from 'lucide-react';
 import { familyTreeService } from '../services/familyTreeService';
 
 const InitialSetup = ({ onSetupComplete }) => {
