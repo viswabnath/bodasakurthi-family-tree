@@ -9,7 +9,8 @@ const InitialSetup = ({ onSetupComplete }) => {
     email: '',
     password: '',
     confirmPassword: '',
-    familyName: ''
+    familyName: '',
+    familyNameFormat: '' // '', 'possessive', 'ji', or 'simple'
   });
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState({});
@@ -54,17 +55,35 @@ const InitialSetup = ({ onSetupComplete }) => {
 
     setIsLoading(true);
     try {
+      // Format the family name based on user selection
+      let formattedFamilyName;
+      switch (formData.familyNameFormat) {
+        case 'possessive':
+          formattedFamilyName = `${formData.familyName}'s Family Tree`;
+          break;
+        case 'ji':
+          formattedFamilyName = `${formData.familyName}ji Family Tree`;
+          break;
+        case 'simple':
+          formattedFamilyName = `${formData.familyName} Family Tree`;
+          break;
+        default:
+          // No suffix selected, use simple format
+          formattedFamilyName = `${formData.familyName} Family Tree`;
+          break;
+      }
+
       const result = await familyTreeService.createInitialAdmin({
         username: formData.username,
         password: formData.password,
         email: formData.email,
-        familyName: formData.familyName
+        familyName: formattedFamilyName
       });
 
       if (result.success) {
         onSetupComplete({
           username: formData.username,
-          familyName: formData.familyName
+          familyName: formattedFamilyName
         });
       } else {
         setErrors({ submit: result.message || 'Setup failed. Please try again.' });
@@ -137,6 +156,35 @@ const InitialSetup = ({ onSetupComplete }) => {
                   {errors.familyName}
                 </motion.p>
               )}
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.35 }}
+            >
+              <label className="block text-sm font-semibold text-amber-900 mb-2">
+                Family Tree Title Format
+              </label>
+              <select
+                value={formData.familyNameFormat}
+                onChange={(e) => setFormData({...formData, familyNameFormat: e.target.value})}
+                className="w-full px-4 py-3 border-2 border-amber-300 bg-white rounded-xl focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all"
+              >
+                <option value="">Select Suffix</option>
+                <option value="possessive">
+                  {formData.familyName ? `${formData.familyName}'s Family Tree` : "Smith's Family Tree"}
+                </option>
+                <option value="ji">
+                  {formData.familyName ? `${formData.familyName}ji Family Tree` : "Smithji Family Tree"}
+                </option>
+                <option value="simple">
+                  {formData.familyName ? `${formData.familyName} Family Tree` : "Smith Family Tree"}
+                </option>
+              </select>
+              <p className="text-amber-600 text-xs mt-1">
+                Choose how your family tree title will appear (optional)
+              </p>
             </motion.div>
 
             <motion.div

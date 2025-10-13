@@ -34,8 +34,9 @@ describe('InitialSetup Component', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Family name is required')).toBeInTheDocument();
-      expect(screen.getByText('Username is required')).toBeInTheDocument();
     });
+    
+    expect(screen.getByText('Username is required')).toBeInTheDocument();
   });
 
   test('validates email format', async () => {

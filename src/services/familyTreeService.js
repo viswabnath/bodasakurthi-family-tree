@@ -47,7 +47,6 @@ export const familyTreeService = {
         return { success: false, message: data.message };
       }
 
-      console.log('✅ Initial admin created successfully');
       return { success: true, message: 'Admin created successfully!' };
     } catch (error) {
       console.error('Error in createInitialAdmin:', error);
@@ -57,22 +56,12 @@ export const familyTreeService = {
   // Save family tree data to database (admin only)
   saveFamilyTree: async (familyData) => {
     try {
-      console.log('🚀 Starting to save family tree...');
-      console.log('📊 Complete family data:', JSON.stringify(familyData, null, 2));
-      console.log('👥 Number of members:', familyData.members.length);
-      
-      // Log each member's complete data
-      familyData.members.forEach((member, index) => {
-        console.log(`👤 Member ${index + 1}:`, JSON.stringify(member, null, 2));
-      });
-      
       const payload = {
         tree_id: PUBLIC_TREE_ID,
         surname: familyData.surname,
         members: familyData.members,
         is_public: true
       };
-      console.log('📦 Final payload to save:', JSON.stringify(payload, null, 2));
       
       const { data, error } = await supabase
         .from('family_trees')
@@ -85,7 +74,6 @@ export const familyTreeService = {
         throw error;
       }
       
-      console.log('✅ Family tree saved to database successfully!');
       return { success: true, data };
     } catch (error) {
       console.error('❌ Error saving family tree:', error);
@@ -96,8 +84,6 @@ export const familyTreeService = {
   // Load family tree data from database (public access)
   loadFamilyTree: async () => {
     try {
-      console.log('📖 Loading public family tree...');
-      
       const { data, error } = await supabase
         .from('family_trees')
         .select('*')
@@ -108,7 +94,6 @@ export const familyTreeService = {
       if (error) {
         if (error.code === 'PGRST116') {
           // No data found, return default empty tree
-          console.log('📝 No public tree found, creating default...');
           return { 
             success: true, 
             data: {
@@ -120,7 +105,6 @@ export const familyTreeService = {
         throw error;
       }
 
-      console.log('✅ Public family tree loaded from database');
       return { 
         success: true, 
         data: {
@@ -137,8 +121,6 @@ export const familyTreeService = {
   // Admin login verification
   verifyAdminLogin: async (username, password) => {
     try {
-      console.log('🔐 Verifying admin login...');
-      
       const { data, error } = await supabase
         .rpc('verify_admin_login', {
           input_username: username,
@@ -148,10 +130,8 @@ export const familyTreeService = {
       if (error) throw error;
       
       if (data) {
-        console.log('✅ Admin login successful');
         return { success: true, isAdmin: true };
       } else {
-        console.log('❌ Invalid admin credentials');
         return { success: false, error: 'Invalid credentials' };
       }
     } catch (error) {
@@ -173,8 +153,6 @@ export const familyTreeService = {
   // Create initial admin user
   createAdminUser: async (username, password) => {
     try {
-      console.log('👤 Creating admin user...');
-      
       const { data, error } = await supabase
         .from('admin_users')
         .insert({
@@ -184,7 +162,6 @@ export const familyTreeService = {
 
       if (error) throw error;
       
-      console.log('✅ Admin user created successfully');
       return { success: true, data };
     } catch (error) {
       console.error('❌ Error creating admin user:', error);
@@ -197,7 +174,6 @@ export const familyTreeService = {
   // Test database connection
   testConnection: async () => {
     try {
-      console.log('🔍 Testing database connection...');
       const { data, error } = await supabase
         .from('family_trees')
         .select('count(*)')
@@ -208,7 +184,6 @@ export const familyTreeService = {
         throw error;
       }
       
-      console.log('✅ Database connection successful', data);
       return { success: true, data };
     } catch (error) {
       console.error('❌ Database connection test failed:', error);

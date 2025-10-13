@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { X, Plus, Edit2, Users, Home, Upload, Heart, Star, LogOut, Save, Check, Lock, User, Camera } from 'lucide-react';
 import { Switch } from '@headlessui/react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -22,10 +22,13 @@ const FamilyTreeApp = () => {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
 
   const [saveStatus, setSaveStatus] = useState('');
+  const [notifications, setNotifications] = useState([]);
   const [showSurnameEdit, setShowSurnameEdit] = useState(false);
   const [tempSurname, setTempSurname] = useState('');
+  const [tempSurnameFormat, setTempSurnameFormat] = useState('');
   const [formErrors, setFormErrors] = useState({});
   const [isFormValid, setIsFormValid] = useState(false);
   const [showOptionalFields, setShowOptionalFields] = useState({
@@ -87,10 +90,10 @@ const FamilyTreeApp = () => {
       if (result.success && result.data) {
         setFamilyData(result.data);
         document.title = `${result.data.surname} Family Tree`;
-        console.log('📖 Loaded public family tree');
+        
+        // Data integrity will be checked in separate useEffect
       } else {
         // No family tree exists yet, show empty state with register option
-        console.log('📝 No family tree found, showing empty state');
         const emptyData = {
           surname: 'Family Tree',
           members: []
@@ -103,6 +106,12 @@ const FamilyTreeApp = () => {
     };
     
     initializeApp();
+    
+    // Detect if this is a touch device for better mobile experience  
+    const checkTouchDevice = () => {
+      setIsTouchDevice('ontouchstart' in window || navigator.maxTouchPoints > 0);
+    };
+    checkTouchDevice();
   }, []);
 
   // Update title when family data changes
@@ -111,6 +120,55 @@ const FamilyTreeApp = () => {
       document.title = `${familyData.surname} Family Tree`;
     }
   }, [familyData.surname]);
+
+  // Data integrity repair function
+  const repairFamilyDataIntegrity = useCallback(() => {
+    if (!familyData.members || familyData.members.length === 0) return false;
+    
+    const updatedMembers = familyData.members.map(member => {
+      // Find all children who have this member as their parent
+      const actualChildren = familyData.members
+        .filter(m => m.parentId === member.id)
+        .map(m => m.id);
+      
+      // Check if children array matches actual parent-child relationships
+      const currentChildren = member.children || [];
+      const missingChildren = actualChildren.filter(childId => !currentChildren.includes(childId));
+      
+      if (missingChildren.length > 0) {
+        return {
+          ...member,
+          children: [...currentChildren, ...missingChildren]
+        };
+      }
+      
+      return member;
+    });
+
+    if (JSON.stringify(updatedMembers) !== JSON.stringify(familyData.members)) {
+      const repairedData = {
+        ...familyData,
+        members: updatedMembers
+      };
+      setFamilyData(repairedData);
+      
+      // Auto-save the repaired data if admin is logged in
+      if (isAdmin) {
+        familyTreeService.saveFamilyTree(repairedData);
+      }
+      
+      return true;
+    }
+    
+    return false;
+  }, [familyData, isAdmin]);
+
+  // Check data integrity when family data changes
+  useEffect(() => {
+    if (familyData.members && familyData.members.length > 0) {
+      repairFamilyDataIntegrity();
+    }
+  }, [familyData.members, repairFamilyDataIntegrity]); // Include all dependencies
 
   const enterHouse = () => {
     setScene('interior');
@@ -210,7 +268,7 @@ const FamilyTreeApp = () => {
 
   const handleAddPerson = async () => {
     if (!validateForm()) {
-      alert('Please fix the validation errors before submitting');
+      showNotification('Please fix the validation errors before submitting', 'warning');
       return;
     }
     
@@ -238,6 +296,7 @@ const FamilyTreeApp = () => {
     setFamilyData(updatedData);
     setShowAddForm(false);
     resetForm();
+    showNotification(`✅ ${newPerson.fullName} added to family tree`, 'success');
     
     // Auto-save to database
     await saveToDatabase(updatedData);
@@ -245,7 +304,7 @@ const FamilyTreeApp = () => {
 
   const handleEditPerson = async () => {
     if (!validateForm()) {
-      alert('Please fix the validation errors before submitting');
+      showNotification('Please fix the validation errors before submitting', 'warning');
       return;
     }
     
@@ -262,6 +321,7 @@ const FamilyTreeApp = () => {
     setShowAddForm(false);
     setEditingPerson(null);
     resetForm();
+    showNotification(`✅ ${editingPerson.fullName} updated successfully`, 'success');
     
     // Auto-save to database
     await saveToDatabase(updatedData);
@@ -286,6 +346,7 @@ const FamilyTreeApp = () => {
     setShowAddForm(false);
     setEditingPerson(null);
     setShowDeleteConfirmation(false);
+    showNotification(`🗑️ ${personToDelete.fullName} removed from family tree`, 'info');
     setPersonToDelete(null);
     resetForm();
     
@@ -380,8 +441,7 @@ const FamilyTreeApp = () => {
     document.title = `${adminInfo.familyName} Family Tree`;
     
     // Show success message
-    setSaveStatus('🎉 Setup completed! You can now access /admin to manage your tree');
-    setTimeout(() => setSaveStatus(''), 5000);
+    showNotification('🎉 Setup completed! You can now access /admin to manage your tree', 'success', 5000);
   };
 
   const resetForm = () => {
@@ -430,10 +490,9 @@ const FamilyTreeApp = () => {
       if (treeResult.success && treeResult.data) {
         setFamilyData(treeResult.data);
       }
-      setSaveStatus('✅ Admin logged in');
-      setTimeout(() => setSaveStatus(''), 3000);
+      showNotification('✅ Admin logged in', 'success');
     } else {
-      alert('Invalid admin credentials. Please try again.');
+      showNotification('Invalid admin credentials. Please try again.', 'error');
     }
   };
 
@@ -447,61 +506,68 @@ const FamilyTreeApp = () => {
 
   const saveToDatabase = async (data = familyData) => {
     if (!isAdmin) {
-      alert('Only admins can save changes. Please log in at /admin');
+      showNotification('Only admins can save changes. Please log in at /admin', 'warning');
       return;
     }
     
-    setSaveStatus('Saving...');
+    showNotification('Saving...', 'info', 1000);
     
     const result = await familyTreeService.saveFamilyTree(data);
     
     if (result.success) {
-      setSaveStatus('✅ Saved');
+      showNotification('✅ Saved successfully', 'success');
     } else {
-      setSaveStatus('❌ Save failed');
-    }
-    
-    // Clear status after 3 seconds
-    setTimeout(() => setSaveStatus(''), 3000);
-  };
-
-  const handleShare = () => {
-    const shareLink = familyTreeService.getShareableLink();
-    navigator.clipboard.writeText(shareLink).then(() => {
-      setSaveStatus('🔗 Link copied to clipboard!');
-      setTimeout(() => setSaveStatus(''), 3000);
-    }).catch(() => {
-      // Fallback for browsers that don't support clipboard API
-      const textArea = document.createElement('textarea');
-      textArea.value = shareLink;
-      document.body.appendChild(textArea);
-      textArea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textArea);
-      setSaveStatus('🔗 Link copied!');
-      setTimeout(() => setSaveStatus(''), 3000);
-    });
-  };
-
-  const loadFromDatabase = async () => {
-    const result = await familyTreeService.loadFamilyTree();
-    if (result.success && result.data) {
-      setFamilyData(result.data);
-      setSaveStatus('✅ Loaded from database');
-      setTimeout(() => setSaveStatus(''), 3000);
+      showNotification('❌ Save failed', 'error');
     }
   };
+
+
 
   const handleSurnameEdit = () => {
-    setTempSurname(familyData.surname);
+    // Extract base family name from current surname (remove various suffixes)
+    const currentSurname = familyData.surname;
+    let baseName = currentSurname;
+    let currentFormat = '';
+    
+    if (currentSurname.endsWith("'s Family Tree")) {
+      baseName = currentSurname.replace("'s Family Tree", "");
+      currentFormat = 'possessive';
+    } else if (currentSurname.endsWith("ji Family Tree")) {
+      baseName = currentSurname.replace("ji Family Tree", "");
+      currentFormat = 'ji';
+    } else if (currentSurname.endsWith(" Family Tree")) {
+      baseName = currentSurname.replace(" Family Tree", "");
+      currentFormat = 'simple';
+    }
+    
+    setTempSurname(baseName);
+    setTempSurnameFormat(currentFormat);
     setShowSurnameEdit(true);
   };
 
   const saveSurname = async () => {
     if (tempSurname.trim()) {
+      // Format the surname based on selection
+      let formattedSurname;
+      switch (tempSurnameFormat) {
+        case 'possessive':
+          formattedSurname = `${tempSurname.trim()}'s Family Tree`;
+          break;
+        case 'ji':
+          formattedSurname = `${tempSurname.trim()}ji Family Tree`;
+          break;
+        case 'simple':
+          formattedSurname = `${tempSurname.trim()} Family Tree`;
+          break;
+        default:
+          // No suffix selected, use simple format
+          formattedSurname = `${tempSurname.trim()} Family Tree`;
+          break;
+      }
+        
       const updatedData = {
         ...familyData,
-        surname: tempSurname.trim()
+        surname: formattedSurname
       };
       setFamilyData(updatedData);
       setShowSurnameEdit(false);
@@ -514,6 +580,28 @@ const FamilyTreeApp = () => {
     setShowSurnameEdit(false);
   };
 
+  // Floating notification system
+  const showNotification = (message, type = 'success', duration = 3000) => {
+    const id = Date.now();
+    const notification = {
+      id,
+      message,
+      type, // 'success', 'error', 'info', 'warning'
+      duration
+    };
+    
+    setNotifications(prev => [...prev, notification]);
+    
+    // Auto-remove after duration
+    setTimeout(() => {
+      removeNotification(id);
+    }, duration);
+  };
+
+  const removeNotification = (id) => {
+    setNotifications(prev => prev.filter(notification => notification.id !== id));
+  };
+
   const openEditForm = (person) => {
     setEditingPerson(person);
     setFormData(person);
@@ -521,47 +609,40 @@ const FamilyTreeApp = () => {
     setShowAddForm(true);
   };
 
-  const exportData = () => {
-    const dataStr = JSON.stringify(familyData, null, 2);
-    const dataBlob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(dataBlob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${familyData.surname}_family_tree.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
 
-  const importData = (event) => {
-    const file = event.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const imported = JSON.parse(e.target.result);
-          setFamilyData(imported);
-        } catch (error) {
-          alert('Error importing file. Please check the format.');
-        }
-      };
-      reader.readAsText(file);
-    }
-  };
 
   const handleMouseDown = (e) => {
     if (e.target.closest('.person-card') || e.target.closest('.control-btn')) return;
+    
+    // Handle both mouse and touch events
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    
     setIsDragging(true);
-    setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+    setDragStart({ x: clientX - pan.x, y: clientY - pan.y });
+    
+    // Prevent default scrolling on touch devices
+    if (e.touches) {
+      e.preventDefault();
+    }
   };
 
   const handleMouseMove = (e) => {
     if (!isDragging) return;
+    
+    // Handle both mouse and touch events
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    
     setPan({
-      x: e.clientX - dragStart.x,
-      y: e.clientY - dragStart.y
+      x: clientX - dragStart.x,
+      y: clientY - dragStart.y
     });
+    
+    // Prevent default scrolling on touch devices while dragging
+    if (e.touches) {
+      e.preventDefault();
+    }
   };
 
   const handleMouseUp = () => {
@@ -1062,7 +1143,7 @@ const FamilyTreeApp = () => {
   }
 
   return (
-    <div className="w-full h-screen bg-gradient-to-br from-orange-100 via-amber-50 to-yellow-100 overflow-hidden relative">
+    <div className="w-full h-screen bg-gradient-to-br from-orange-100 via-amber-50 to-yellow-100 overflow-hidden relative" style={{ touchAction: 'none' }}>
       {/* Enhanced background textures with brick wall pattern */}
       <div className="absolute inset-0 opacity-30" style={{
         backgroundImage: `radial-gradient(circle at 20% 80%, rgba(251, 191, 36, 0.3) 0%, transparent 50%), 
@@ -1122,16 +1203,32 @@ const FamilyTreeApp = () => {
         <div className="flex justify-between items-center max-w-7xl mx-auto relative z-10">
           <div className="flex items-center gap-4">
             {showSurnameEdit ? (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <input
                   type="text"
                   value={tempSurname}
                   onChange={(e) => setTempSurname(e.target.value)}
-                  className="text-2xl font-bold bg-white text-amber-900 border border-amber-300 rounded px-2 py-1"
+                  className="text-xl font-bold bg-white text-amber-900 border border-amber-300 rounded px-2 py-1"
                   placeholder="Family Name"
                   onKeyPress={(e) => e.key === 'Enter' && saveSurname()}
                   autoFocus
                 />
+                <select
+                  value={tempSurnameFormat}
+                  onChange={(e) => setTempSurnameFormat(e.target.value)}
+                  className="bg-white text-amber-900 border border-amber-300 rounded px-2 py-1 text-sm"
+                >
+                  <option value="">Select Suffix</option>
+                  <option value="possessive">
+                    {tempSurname ? `${tempSurname}'s Family Tree` : "Smith's Family Tree"}
+                  </option>
+                  <option value="ji">
+                    {tempSurname ? `${tempSurname}ji Family Tree` : "Smithji Family Tree"}
+                  </option>
+                  <option value="simple">
+                    {tempSurname ? `${tempSurname} Family Tree` : "Smith Family Tree"}
+                  </option>
+                </select>
                 <button
                   onClick={saveSurname}
                   className="p-1 text-green-400 hover:text-green-300"
@@ -1149,7 +1246,7 @@ const FamilyTreeApp = () => {
               </div>
             ) : (
               <div className="flex items-center gap-2">
-                <h2 className="text-3xl font-bold font-serif">{familyData.surname} Heritage Wall</h2>
+                <h2 className="text-3xl font-bold font-serif">{familyData.surname}</h2>
                 {isAdmin && (
                   <button
                     onClick={handleSurnameEdit}
@@ -1197,12 +1294,7 @@ const FamilyTreeApp = () => {
               </button>
             )}
             
-            {/* Save Status */}
-            {saveStatus && (
-              <div className="text-amber-100 text-sm bg-amber-800/50 px-3 py-1 rounded">
-                {saveStatus}
-              </div>
-            )}
+
           </div>
         </div>
       </div>
@@ -1237,6 +1329,13 @@ const FamilyTreeApp = () => {
           onClick={() => {
             setZoom(0.8);
             setPan({ x: 0, y: 0 });
+            // On mobile, also scroll to top
+            if (isTouchDevice) {
+              const container = document.querySelector('.family-tree-container');
+              if (container) {
+                container.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+              }
+            }
           }}
           className="bg-white/98 backdrop-blur-sm rounded-lg shadow-xl border border-gray-300 w-12 h-12 flex items-center justify-center hover:bg-gray-50 active:bg-gray-100 transition-all text-gray-600 hover:text-gray-800"
           title="Reset View"
@@ -1261,11 +1360,18 @@ const FamilyTreeApp = () => {
       </div>
 
       <div
-        className="absolute inset-0 pt-24 cursor-move"
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
+        className={`absolute inset-0 pt-24 family-tree-container ${isTouchDevice ? 'overflow-auto' : 'cursor-move overflow-hidden'}`}
+        onMouseDown={!isTouchDevice ? handleMouseDown : undefined}
+        onMouseMove={!isTouchDevice ? handleMouseMove : undefined}
+        onMouseUp={!isTouchDevice ? handleMouseUp : undefined}
+        onMouseLeave={!isTouchDevice ? handleMouseUp : undefined}
+        onTouchStart={!isTouchDevice ? handleMouseDown : undefined}
+        onTouchMove={!isTouchDevice ? handleMouseMove : undefined}
+        onTouchEnd={!isTouchDevice ? handleMouseUp : undefined}
+        style={{
+          WebkitOverflowScrolling: isTouchDevice ? 'touch' : 'auto',
+          touchAction: isTouchDevice ? 'pan-x pan-y' : 'none'
+        }}
       >
         {familyData.members.length === 0 ? (
           // Empty state when no family tree exists
@@ -1310,20 +1416,35 @@ const FamilyTreeApp = () => {
             </motion.div>
           </div>
         ) : (
-          // Normal family tree view
-          <div
-            style={{
-              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-              transformOrigin: 'center center',
-              transition: isDragging ? 'none' : 'transform 0.3s ease'
-            }}
-            className="relative"
-          >
-            <svg className="absolute inset-0 pointer-events-none" style={{ width: '2500px', height: '2500px' }}>
-              {renderConnections()}
-            </svg>
-            
-            {familyData.members.map((person, index) => renderPersonCard(person, index))}
+          // Normal family tree view with mobile-friendly scrolling
+          <div className="w-full h-full relative">
+            <div
+              style={{
+                transform: isTouchDevice ? `scale(${zoom})` : `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                transformOrigin: 'center center',
+                transition: isDragging ? 'none' : 'transform 0.3s ease',
+                width: isTouchDevice ? 'max-content' : '3000px',
+                height: isTouchDevice ? 'max-content' : '2500px',
+                minWidth: isTouchDevice ? `${100 * zoom}vw` : '3000px',
+                minHeight: isTouchDevice ? `${100 * zoom}vh` : '2500px',
+                padding: isTouchDevice ? '20px' : '0'
+              }}
+              className="relative"
+            >
+              <svg 
+                className="absolute inset-0 pointer-events-none" 
+                style={{ 
+                  width: '100%', 
+                  height: '100%',
+                  minWidth: isTouchDevice ? `${200 * zoom}vw` : 'auto',
+                  minHeight: isTouchDevice ? `${150 * zoom}vh` : 'auto'
+                }}
+              >
+                {renderConnections()}
+              </svg>
+              
+              {familyData.members.map((person, index) => renderPersonCard(person, index))}
+            </div>
           </div>
         )}
       </div>
@@ -2058,6 +2179,47 @@ const FamilyTreeApp = () => {
           </div>
         </div>
       )}
+
+      {/* Floating Notifications */}
+      <div className="fixed top-4 right-4 z-50 space-y-2">
+        <AnimatePresence>
+          {notifications.map((notification) => (
+            <motion.div
+              key={notification.id}
+              initial={{ opacity: 0, x: 300, scale: 0.8 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: 300, scale: 0.8 }}
+              transition={{ type: "spring", damping: 20, stiffness: 300 }}
+              className={`
+                relative max-w-sm p-4 rounded-lg shadow-2xl border-l-4 backdrop-blur-sm
+                ${notification.type === 'success' ? 'bg-green-50/95 border-green-500 text-green-800' : ''}
+                ${notification.type === 'error' ? 'bg-red-50/95 border-red-500 text-red-800' : ''}
+                ${notification.type === 'info' ? 'bg-blue-50/95 border-blue-500 text-blue-800' : ''}
+                ${notification.type === 'warning' ? 'bg-yellow-50/95 border-yellow-500 text-yellow-800' : ''}
+              `}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <div className={`
+                    w-2 h-2 rounded-full
+                    ${notification.type === 'success' ? 'bg-green-500' : ''}
+                    ${notification.type === 'error' ? 'bg-red-500' : ''}
+                    ${notification.type === 'info' ? 'bg-blue-500' : ''}
+                    ${notification.type === 'warning' ? 'bg-yellow-500' : ''}
+                  `}></div>
+                  <span className="text-sm font-medium">{notification.message}</span>
+                </div>
+                <button
+                  onClick={() => removeNotification(notification.id)}
+                  className="ml-4 text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
     </div>
   );
 };
