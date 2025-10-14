@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { X, Plus, Edit2, Users, Home, Upload, Heart, Star, LogOut, Save, Check, Lock, User, Camera } from 'lucide-react';
+import { X, Plus, Edit2, Users, Home, Upload, Heart, Star, LogOut, Save, Check, Lock, User, Camera,  } from 'lucide-react';
 import { Switch } from '@headlessui/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactCrop from 'react-image-crop';
@@ -12,7 +12,7 @@ const FamilyTreeApp = () => {
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [adminCredentials, setAdminCredentials] = useState({ username: '', password: '' });
   const [familyData, setFamilyData] = useState({
-    surname: 'Family',
+    surname: '',
     members: []
   });
   const [selectedPerson, setSelectedPerson] = useState(null);
@@ -24,7 +24,6 @@ const FamilyTreeApp = () => {
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [isTouchDevice, setIsTouchDevice] = useState(false);
 
-  const [saveStatus, setSaveStatus] = useState('');
   const [notifications, setNotifications] = useState([]);
   const [showSurnameEdit, setShowSurnameEdit] = useState(false);
   const [tempSurname, setTempSurname] = useState('');
@@ -89,13 +88,13 @@ const FamilyTreeApp = () => {
       const result = await familyTreeService.loadFamilyTree();
       if (result.success && result.data) {
         setFamilyData(result.data);
-        document.title = `${result.data.surname} Family Tree`;
+        document.title = `${result.data.surname} `;
         
         // Data integrity will be checked in separate useEffect
       } else {
         // No family tree exists yet, show empty state with register option
         const emptyData = {
-          surname: 'Family Tree',
+          surname: 'Family',
           members: []
         };
         setFamilyData(emptyData);
@@ -529,14 +528,14 @@ const FamilyTreeApp = () => {
     let baseName = currentSurname;
     let currentFormat = '';
     
-    if (currentSurname.endsWith("'s Family Tree")) {
-      baseName = currentSurname.replace("'s Family Tree", "");
+    if (currentSurname.endsWith("'s")) {
+      baseName = currentSurname.replace("'s", "");
       currentFormat = 'possessive';
-    } else if (currentSurname.endsWith("ji Family Tree")) {
-      baseName = currentSurname.replace("ji Family Tree", "");
+    } else if (currentSurname.endsWith("ji")) {
+      baseName = currentSurname.replace("ji", "");
       currentFormat = 'ji';
-    } else if (currentSurname.endsWith(" Family Tree")) {
-      baseName = currentSurname.replace(" Family Tree", "");
+    } else {
+      baseName = currentSurname;
       currentFormat = 'simple';
     }
     
@@ -551,17 +550,17 @@ const FamilyTreeApp = () => {
       let formattedSurname;
       switch (tempSurnameFormat) {
         case 'possessive':
-          formattedSurname = `${tempSurname.trim()}'s Family Tree`;
+          formattedSurname = `${tempSurname.trim()}'s`;
           break;
         case 'ji':
-          formattedSurname = `${tempSurname.trim()}ji Family Tree`;
+          formattedSurname = `${tempSurname.trim()}ji`;
           break;
         case 'simple':
-          formattedSurname = `${tempSurname.trim()} Family Tree`;
+          formattedSurname = `${tempSurname.trim()}`;
           break;
         default:
           // No suffix selected, use simple format
-          formattedSurname = `${tempSurname.trim()} Family Tree`;
+          formattedSurname = `${tempSurname.trim()}`;
           break;
       }
         
@@ -608,6 +607,8 @@ const FamilyTreeApp = () => {
     setCroppedImage(person.photo); // Set cropped image to existing photo
     setShowAddForm(true);
   };
+
+
 
 
 
@@ -1123,7 +1124,7 @@ const FamilyTreeApp = () => {
             </div>
           </div>
           <h1 className="text-6xl font-bold text-amber-50 mb-4 font-serif drop-shadow-2xl">
-            The {familyData.surname} Family
+            The {familyData.surname}
           </h1>
           <p className="text-2xl text-amber-200 mb-12 italic drop-shadow-lg">A Living House of Memories</p>
           
@@ -1275,6 +1276,7 @@ const FamilyTreeApp = () => {
                 Add Member
               </button>
             )}
+            
             {isAdmin && (
               <button
                 onClick={handleAdminLogout}

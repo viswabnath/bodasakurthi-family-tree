@@ -59,17 +59,17 @@ const InitialSetup = ({ onSetupComplete }) => {
       let formattedFamilyName;
       switch (formData.familyNameFormat) {
         case 'possessive':
-          formattedFamilyName = `${formData.familyName}'s Family Tree`;
+          formattedFamilyName = `${formData.familyName}'s`;
           break;
         case 'ji':
-          formattedFamilyName = `${formData.familyName}ji Family Tree`;
+          formattedFamilyName = `${formData.familyName}ji`;
           break;
         case 'simple':
-          formattedFamilyName = `${formData.familyName} Family Tree`;
+          formattedFamilyName = `${formData.familyName}`;
           break;
         default:
           // No suffix selected, use simple format
-          formattedFamilyName = `${formData.familyName} Family Tree`;
+          formattedFamilyName = `${formData.familyName}`;
           break;
       }
 
@@ -164,7 +164,7 @@ const InitialSetup = ({ onSetupComplete }) => {
               transition={{ delay: 0.35 }}
             >
               <label className="block text-sm font-semibold text-amber-900 mb-2">
-                Family Tree Title Format
+                Family Name Format
               </label>
               <select
                 value={formData.familyNameFormat}
@@ -173,17 +173,17 @@ const InitialSetup = ({ onSetupComplete }) => {
               >
                 <option value="">Select Suffix</option>
                 <option value="possessive">
-                  {formData.familyName ? `${formData.familyName}'s Family Tree` : "Smith's Family Tree"}
+                  {formData.familyName ? `${formData.familyName}'s` : "Smith's"}
                 </option>
                 <option value="ji">
-                  {formData.familyName ? `${formData.familyName}ji Family Tree` : "Smithji Family Tree"}
+                  {formData.familyName ? `${formData.familyName}ji` : "Smithji"}
                 </option>
                 <option value="simple">
-                  {formData.familyName ? `${formData.familyName} Family Tree` : "Smith Family Tree"}
+                  {formData.familyName ? `${formData.familyName}` : "Smith"}
                 </option>
               </select>
               <p className="text-amber-600 text-xs mt-1">
-                Choose how your family tree title will appear (optional)
+                Choose how your family name will appear (optional)
               </p>
             </motion.div>
 
