@@ -190,8 +190,7 @@ npx serve -s build
 npm install -g vercel
 vercel --prod
 ```
-
-**Live Example**: [bodasakurthi-family-tree-viswanath-bodasakurthis-projects.vercel.app](https://bodasakurthi-family-tree-viswanath-bodasakurthis-projects.vercel.app?_vercel_share=WS4x9q5K5ofMYHtmNb6qbH51rcUUxROO)
+**Live Example**: [View Demo](https://bodasakurthi-family-tree-viswanath-bodasakurthis-projects.vercel.app?_vercel_share=WS4x9q5K5ofMYHtmNb6qbH51rcUUxROO)
 
 ### **Netlify**
 ```bash
