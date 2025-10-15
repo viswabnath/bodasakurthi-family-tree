@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { X, Plus, Edit2, Users, Home, Upload, Heart, Star, LogOut, Save, Check, Lock, User, Camera,  } from 'lucide-react';
+import { X, Plus, Edit2, Users, Home, Upload, Heart, Star, LogOut, Save, Check, Lock, User, Camera, AlertCircle } from 'lucide-react';
 import { Switch } from '@headlessui/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactCrop from 'react-image-crop';
@@ -45,6 +45,8 @@ const FamilyTreeApp = () => {
   const [croppedImage, setCroppedImage] = useState(null);
   const [needsInitialSetup, setNeedsInitialSetup] = useState(false);
   const [checkingSetup, setCheckingSetup] = useState(true);
+  const [selectedChildrenToLink, setSelectedChildrenToLink] = useState([]);
+  const [childrenToMoveInSwap, setChildrenToMoveInSwap] = useState([]); // For parent-child swap scenario
 
   const [formData, setFormData] = useState({
     id: Date.now(),
@@ -186,10 +188,7 @@ const FamilyTreeApp = () => {
       errors.fullName = 'Full name is required';
     }
     
-    // Parent is required (except for the root/first person or when editing existing person)
-    if (familyData.members.length > 0 && !editingPerson && !data.parentId) {
-      errors.parentId = 'Parent selection is required';
-    }
+    // Parent is no longer required - users can create root members at any time
     
     // Date validation - only if date is provided
     if (data.dateOfBirth) {
@@ -277,15 +276,67 @@ const FamilyTreeApp = () => {
       children: []
     };
 
-    const updatedMembers = familyData.members.map(member => {
-      if (member.id === formData.parentId) {
+    let updatedMembers = (familyData.members || []).map(member => {
+      if (member && member.id === formData.parentId) {
         return {
           ...member,
-          children: [...member.children, newPerson.id]
+          children: [...(member.children || []), newPerson.id]
         };
       }
       return member;
     });
+
+    // Handle children linking for new root members
+    if (!formData.parentId && selectedChildrenToLink.length > 0) {
+      // This is a new root member with selected children to link
+      const allChildrenToLink = new Set(selectedChildrenToLink);
+      
+      // Find siblings of selected children and add them
+      selectedChildrenToLink.forEach(childId => {
+        const child = (familyData.members || []).find(m => m && m.id === childId);
+        if (child && child.parentId) {
+          // Find siblings - members who share the same parent
+          const siblings = (familyData.members || []).filter(member =>
+            member &&
+            member.parentId === child.parentId && 
+            member.id !== childId
+          );
+          
+          // Add all siblings to the link list
+          siblings.forEach(sibling => allChildrenToLink.add(sibling.id));
+        }
+      });
+      
+      // Update the new person with all selected children (including auto-linked siblings)
+      newPerson.children = Array.from(allChildrenToLink);
+      
+      // Update all linked children to have this new root member as their parent
+      updatedMembers = updatedMembers.map(member => {
+        if (allChildrenToLink.has(member.id)) {
+          return {
+            ...member,
+            parentId: newPerson.id,
+            generation: 1 // Children of root are generation 1
+          };
+        }
+        return member;
+      });
+      
+      const autoLinkedCount = allChildrenToLink.size - selectedChildrenToLink.length;
+      if (autoLinkedCount > 0) {
+        showNotification(
+          `✅ ${newPerson.fullName} added! ${autoLinkedCount} sibling(s) automatically linked.`,
+          'success',
+          4000
+        );
+      } else if (selectedChildrenToLink.length > 0) {
+        showNotification(`✅ ${newPerson.fullName} added with ${selectedChildrenToLink.length} child${selectedChildrenToLink.length > 1 ? 'ren' : ''}`, 'success');
+      } else {
+        showNotification(`✅ ${newPerson.fullName} added to family tree`, 'success');
+      }
+    } else {
+      showNotification(`✅ ${newPerson.fullName} added to family tree`, 'success');
+    }
 
     const updatedData = {
       ...familyData,
@@ -294,8 +345,9 @@ const FamilyTreeApp = () => {
 
     setFamilyData(updatedData);
     setShowAddForm(false);
+    setSelectedChildrenToLink([]);
+    setChildrenToMoveInSwap([]);
     resetForm();
-    showNotification(`✅ ${newPerson.fullName} added to family tree`, 'success');
     
     // Auto-save to database
     await saveToDatabase(updatedData);
@@ -307,9 +359,233 @@ const FamilyTreeApp = () => {
       return;
     }
     
-    const updatedMembers = familyData.members.map(member => 
-      member.id === editingPerson.id ? { ...formData, id: editingPerson.id } : member
-    );
+    let updatedMembers = [...familyData.members];
+    const wasRoot = isRootMember(editingPerson);
+    const willBeRoot = !formData.parentId;
+    
+    // SCENARIO 1: Root member being changed to have a parent (parent-child swap)
+    if (wasRoot && !willBeRoot && formData.parentId) {
+      const oldParent = editingPerson; // The current root (e.g., Dorayya)
+      const newParentId = formData.parentId;
+      const newParent = familyData.members.find(m => m.id === newParentId);
+      
+      // Get old parent's existing children (excluding the new parent)
+      const oldParentChildren = (oldParent.children || []).filter(id => id !== newParentId);
+      
+      // Determine which children to move to new root vs keep with old parent
+      const childrenToMove = childrenToMoveInSwap; // User-selected children to move
+      const childrenToKeep = oldParentChildren.filter(id => !childrenToMove.includes(id));
+      
+      // New parent's children: existing + old parent + selected children to move
+      const newParentExistingChildren = newParent?.children || [];
+      const allChildrenForNewParent = [...new Set([
+        ...newParentExistingChildren,
+        oldParent.id,
+        ...childrenToMove
+      ])];
+      
+      // Update the old parent (now becomes child, keeps non-moved children)
+      updatedMembers = updatedMembers.map(member => {
+        if (member.id === editingPerson.id) {
+          return { 
+            ...formData, 
+            id: editingPerson.id,
+            parentId: newParentId,
+            generation: 1, // Now a child of the new root
+            children: childrenToKeep // Keep children that weren't moved
+          };
+        }
+        return member;
+      });
+      
+      // Update the new parent (now becomes root)
+      updatedMembers = updatedMembers.map(member => {
+        if (member.id === newParentId) {
+          return {
+            ...member,
+            parentId: null,
+            generation: 0, // Now root
+            children: allChildrenForNewParent
+          };
+        }
+        return member;
+      });
+      
+      // Update children that were moved (become direct children of new root)
+      updatedMembers = updatedMembers.map(member => {
+        if (childrenToMove.includes(member.id)) {
+          return {
+            ...member,
+            parentId: newParentId,
+            generation: 1 // Direct children of new root
+          };
+        }
+        return member;
+      });
+      
+      // Update children that were kept (update their generation to 2 now)
+      updatedMembers = updatedMembers.map(member => {
+        if (childrenToKeep.includes(member.id)) {
+          return {
+            ...member,
+            parentId: oldParent.id, // Still children of old parent
+            generation: 2 // Now grandchildren of new root
+          };
+        }
+        return member;
+      });
+      
+      const movedCount = childrenToMove.length;
+      const keptCount = childrenToKeep.length;
+      let message = `✅ Family structure reorganized! ${newParent.fullName} is now root.`;
+      if (movedCount > 0) {
+        message += ` ${movedCount} child(ren) moved to new root.`;
+      }
+      if (keptCount > 0) {
+        message += ` ${keptCount} child(ren) kept with ${oldParent.fullName}.`;
+      }
+      
+      showNotification(message, 'success', 5000);
+    }
+    // SCENARIO 2: Editing existing root member (staying as root)
+    else if (wasRoot && willBeRoot) {
+      // Handle children linking for root member
+      const currentChildren = editingPerson.children || [];
+      const newlyLinkedChildren = selectedChildrenToLink.filter(childId => !currentChildren.includes(childId));
+      
+      if (newlyLinkedChildren.length > 0) {
+        // For each newly linked child, also link all their siblings
+        const allChildrenToLink = new Set(selectedChildrenToLink);
+        
+        newlyLinkedChildren.forEach(childId => {
+          const child = familyData.members.find(m => m.id === childId);
+          if (child && child.parentId) {
+            // Find siblings - members who share the same parent
+            const siblings = familyData.members.filter(member =>
+              member.parentId === child.parentId && 
+              member.id !== childId
+            );
+            
+            // Add all siblings to the link list
+            siblings.forEach(sibling => allChildrenToLink.add(sibling.id));
+          }
+        });
+        
+        // Update the root member with all selected children (including auto-linked siblings)
+        updatedMembers = updatedMembers.map(member => {
+          if (member.id === editingPerson.id) {
+            return { 
+              ...formData, 
+              id: editingPerson.id,
+              children: Array.from(allChildrenToLink)
+            };
+          }
+          return member;
+        });
+        
+        // Update all linked children to have this root member as their parent
+        updatedMembers = updatedMembers.map(member => {
+          if (allChildrenToLink.has(member.id)) {
+            return {
+              ...member,
+              parentId: editingPerson.id,
+              generation: 1 // Children of root are generation 1
+            };
+          }
+          return member;
+        });
+        
+        // Handle unlinked children (children that were removed from selection)
+        const unlinkedChildren = currentChildren.filter(childId => !selectedChildrenToLink.includes(childId));
+        if (unlinkedChildren.length > 0) {
+          updatedMembers = updatedMembers.map(member => {
+            if (unlinkedChildren.includes(member.id)) {
+              return {
+                ...member,
+                parentId: null, // Make them orphans/roots
+                generation: 0
+              };
+            }
+            return member;
+          });
+        }
+        
+        const autoLinkedCount = allChildrenToLink.size - selectedChildrenToLink.length;
+        if (autoLinkedCount > 0) {
+          showNotification(
+            `✅ ${editingPerson.fullName} updated! ${autoLinkedCount} sibling(s) automatically linked.`,
+            'success',
+            4000
+          );
+        } else {
+          showNotification(`✅ ${editingPerson.fullName} updated successfully`, 'success');
+        }
+      } else {
+        // No new children linked, just update the member normally
+        updatedMembers = updatedMembers.map(member => 
+          member.id === editingPerson.id ? { ...formData, id: editingPerson.id, children: selectedChildrenToLink } : member
+        );
+        
+        // Handle unlinked children
+        const currentChildren = editingPerson.children || [];
+        const unlinkedChildren = currentChildren.filter(childId => !selectedChildrenToLink.includes(childId));
+        if (unlinkedChildren.length > 0) {
+          updatedMembers = updatedMembers.map(member => {
+            if (unlinkedChildren.includes(member.id)) {
+              return {
+                ...member,
+                parentId: null,
+                generation: 0
+              };
+            }
+            return member;
+          });
+        }
+        
+        showNotification(`✅ ${editingPerson.fullName} updated successfully`, 'success');
+      }
+    }
+    // SCENARIO 3: Non-root member being changed to root
+    else if (!wasRoot && willBeRoot) {
+      // Handle children linking
+      const allChildrenToLink = new Set(selectedChildrenToLink);
+      
+      // Update this member to be root with selected children
+      updatedMembers = updatedMembers.map(member => {
+        if (member.id === editingPerson.id) {
+          return {
+            ...formData,
+            id: editingPerson.id,
+            parentId: null,
+            generation: 0,
+            children: Array.from(allChildrenToLink)
+          };
+        }
+        return member;
+      });
+      
+      // Update all linked children
+      updatedMembers = updatedMembers.map(member => {
+        if (allChildrenToLink.has(member.id)) {
+          return {
+            ...member,
+            parentId: editingPerson.id,
+            generation: 1
+          };
+        }
+        return member;
+      });
+      
+      showNotification(`✅ ${editingPerson.fullName} is now a root member`, 'success');
+    }
+    // SCENARIO 4: Regular edit (not involving root changes)
+    else {
+      // Not editing root member, update normally
+      updatedMembers = updatedMembers.map(member => 
+        member.id === editingPerson.id ? { ...formData, id: editingPerson.id } : member
+      );
+      showNotification(`✅ ${editingPerson.fullName} updated successfully`, 'success');
+    }
 
     const updatedData = {
       ...familyData,
@@ -319,8 +595,9 @@ const FamilyTreeApp = () => {
     setFamilyData(updatedData);
     setShowAddForm(false);
     setEditingPerson(null);
+    setSelectedChildrenToLink([]);
+    setChildrenToMoveInSwap([]);
     resetForm();
-    showNotification(`✅ ${editingPerson.fullName} updated successfully`, 'success');
     
     // Auto-save to database
     await saveToDatabase(updatedData);
@@ -464,6 +741,8 @@ const FamilyTreeApp = () => {
     setFormErrors({});
     setIsFormValid(false);
     setCroppedImage(null);
+    setSelectedChildrenToLink([]);
+    setChildrenToMoveInSwap([]);
     setShowOptionalFields({
       birthDate: false,
       birthStar: false,
@@ -601,11 +880,64 @@ const FamilyTreeApp = () => {
     setNotifications(prev => prev.filter(notification => notification.id !== id));
   };
 
+  // Helper function to check if a person is the root member
+  const isRootMember = (person) => {
+    return !person.parentId || person.generation === 0;
+  };
+
+  // Helper function to find potential children for root member
+  const findPotentialChildren = (rootMember) => {
+    if (!rootMember || !isRootMember(rootMember)) return [];
+    if (!familyData.members || familyData.members.length === 0) return [];
+    
+    // When editing a root member, they can link:
+    // 1. Other root members (to reorganize tree - make them children)
+    // 2. Members without a parent
+    // 3. Members who already have this root as their parent (existing children)
+    // But NOT themselves
+    return familyData.members.filter(member => {
+      if (!member || member.id === rootMember.id) return false;
+      
+      // Include members without a parent (including other roots)
+      // OR members who already have this root as their parent (existing children)
+      return !member.parentId || member.parentId === rootMember.id;
+    });
+  };
+
+  // Helper function to get all siblings of a person
+  const getSiblings = (personId) => {
+    if (!familyData.members || familyData.members.length === 0) return [];
+    
+    const person = familyData.members.find(m => m && m.id === personId);
+    if (!person || !person.parentId) return [];
+    
+    // Find all members with the same parent (excluding the person themselves)
+    return familyData.members.filter(member => 
+      member &&
+      member.id !== personId && 
+      member.parentId === person.parentId
+    );
+  };
+
   const openEditForm = (person) => {
     setEditingPerson(person);
     setFormData(person);
     setCroppedImage(person.photo); // Set cropped image to existing photo
     setShowAddForm(true);
+    
+    // Automatically enable toggles for fields that have data
+    setShowOptionalFields({
+      birthDate: !!person.dateOfBirth,
+      birthStar: !!person.birthStar,
+      deathDate: !person.isLiving || !!person.dateOfDeath,
+      nicknames: !!person.nicknames,
+      parent: true // Always show parent option for editing
+    });
+    
+    // Always initialize with existing children (if any)
+    // This ensures that when a non-root member with children is changed to root,
+    // their existing children are pre-selected and will remain linked
+    setSelectedChildrenToLink(person.children || []);
   };
 
 
@@ -1773,7 +2105,7 @@ const FamilyTreeApp = () => {
                       birthDate: 'Add Birth Date',
                       birthStar: 'Add Birth Star',
                       nicknames: 'Add Nicknames',
-                      ...((familyData.members.length === 0 || editingPerson) && { parent: 'Add Parent' }),
+                      parent: 'Add Parent / Make Root',
                     }).map(([key, label]) => (
                       <div key={key} className="flex items-center justify-between p-3 bg-white rounded-xl border border-green-200">
                         <span className="text-green-800 font-medium">{label}</span>
@@ -1882,51 +2214,8 @@ const FamilyTreeApp = () => {
                       </motion.div>
                     )}
 
-                    {/* Parent selection - required for non-root members */}
-                    {familyData.members.length > 0 && !editingPerson && (
-                      <motion.div 
-                        className="mb-4"
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                      >
-                        <label className="block text-green-900 font-semibold mb-2">Parent *</label>
-                        <select
-                          value={formData.parentId || ''}
-                          onChange={(e) => {
-                            const parentId = e.target.value ? parseInt(e.target.value) : null;
-                            const parent = familyData.members.find(m => m.id === parentId);
-                            updateFormData({ 
-                              ...formData, 
-                              parentId,
-                              generation: parent ? parent.generation + 1 : 0
-                            });
-                          }}
-                          className={`w-full p-4 border-2 rounded-xl focus:outline-none transition-all ${
-                            formErrors.parentId 
-                              ? 'border-red-500 focus:border-red-600 bg-red-50' 
-                              : 'border-green-300 focus:border-green-600 bg-white'
-                          }`}
-                        >
-                          <option value="">Select a parent...</option>
-                          {familyData.members.map(member => (
-                            <option key={member.id} value={member.id}>{member.fullName}</option>
-                          ))}
-                        </select>
-                        {formErrors.parentId && (
-                          <motion.p 
-                            className="text-red-500 text-sm mt-1"
-                            initial={{ opacity: 0, y: -10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                          >
-                            {formErrors.parentId}
-                          </motion.p>
-                        )}
-                      </motion.div>
-                    )}
-
-                    {/* Optional parent selection for root member or when editing */}
-                    {(familyData.members.length === 0 || editingPerson) && showOptionalFields.parent && (
+                    {/* Parent selection - always optional now */}
+                    {showOptionalFields.parent && (
                       <motion.div 
                         className="mb-4"
                         initial={{ opacity: 0, height: 0 }}
@@ -1952,6 +2241,223 @@ const FamilyTreeApp = () => {
                             <option key={member.id} value={member.id}>{member.fullName}</option>
                           ))}
                         </select>
+                      </motion.div>
+                    )}
+
+                    {/* Parent-Child Swap Section - When root member gets a parent */}
+                    {editingPerson && isRootMember(editingPerson) && formData.parentId && showOptionalFields.parent && (
+                      <motion.div 
+                        className="mb-4"
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                      >
+                        <div className="bg-gradient-to-r from-orange-50 to-yellow-50 p-4 rounded-xl border-2 border-orange-300">
+                          <label className="block text-orange-900 font-semibold mb-2 flex items-center gap-2">
+                            <AlertCircle size={20} />
+                            Children Transfer Options (Optional)
+                          </label>
+                          <p className="text-sm text-orange-700 mb-3">
+                            {editingPerson.fullName} has {(editingPerson.children || []).length} child(ren). 
+                            By default, they will remain with {editingPerson.fullName} (become grandchildren). 
+                            You can optionally select children to move to {familyData.members.find(m => m.id === formData.parentId)?.fullName || 'the new root'}.
+                          </p>
+                          
+                          {(() => {
+                            const oldParentChildren = (editingPerson.children || []).filter(id => id !== formData.parentId);
+                            
+                            if (oldParentChildren.length === 0) {
+                              return (
+                                <p className="text-sm text-gray-600 italic">
+                                  No children to transfer.
+                                </p>
+                              );
+                            }
+                            
+                            return (
+                              <div className="space-y-2 max-h-60 overflow-y-auto">
+                                {oldParentChildren.map(childId => {
+                                  const child = familyData.members.find(m => m.id === childId);
+                                  if (!child) return null;
+                                  
+                                  const isSelected = childrenToMoveInSwap.includes(childId);
+                                  
+                                  return (
+                                    <div 
+                                      key={childId}
+                                      className={`p-3 rounded-lg border-2 transition-all ${
+                                        isSelected 
+                                          ? 'bg-orange-100 border-orange-400' 
+                                          : 'bg-white border-gray-200 hover:border-orange-300'
+                                      }`}
+                                    >
+                                      <label className="flex items-start gap-3 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={isSelected}
+                                          onChange={(e) => {
+                                            if (e.target.checked) {
+                                              setChildrenToMoveInSwap(prev => [...prev, childId]);
+                                            } else {
+                                              setChildrenToMoveInSwap(prev => prev.filter(id => id !== childId));
+                                            }
+                                          }}
+                                          className="mt-1 w-5 h-5 text-orange-600 rounded focus:ring-orange-500"
+                                        />
+                                        <div className="flex-1">
+                                          <div className="font-semibold text-gray-800">
+                                            {child.fullName}
+                                            {child.gender === 'male' ? ' ♂' : ' ♀'}
+                                          </div>
+                                          {child.dateOfBirth && (
+                                            <div className="text-sm text-gray-600">
+                                              Born: {new Date(child.dateOfBirth).toLocaleDateString()}
+                                            </div>
+                                          )}
+                                          {isSelected && (
+                                            <div className="text-xs text-orange-700 mt-1 bg-orange-50 px-2 py-1 rounded">
+                                              Will be moved to {familyData.members.find(m => m.id === formData.parentId)?.fullName || 'new root'} (Gen 1)
+                                            </div>
+                                          )}
+                                          {!isSelected && (
+                                            <div className="text-xs text-gray-600 mt-1">
+                                              Will stay with {editingPerson.fullName} (Gen 2 - grandchild)
+                                            </div>
+                                          )}
+                                        </div>
+                                      </label>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })()}
+                          
+                          <div className="mt-3 text-sm text-orange-800 bg-orange-100 p-2 rounded">
+                            ℹ️ {childrenToMoveInSwap.length} child(ren) will move to new root. 
+                            {(editingPerson.children || []).length - childrenToMoveInSwap.length - (editingPerson.children?.includes(formData.parentId) ? 1 : 0)} will stay with {editingPerson.fullName}.
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+
+                    {/* Children linking section - for root members (editing or adding new with no parent) */}
+                    {/* Show ONLY if form state has no parent - reactive to current form selection */}
+                    {((editingPerson && !formData.parentId && showOptionalFields.parent) || (!editingPerson && !formData.parentId && showOptionalFields.parent)) && (
+                      <motion.div 
+                        className="mb-4"
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                      >
+                        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-xl border-2 border-blue-200">
+                          <label className="block text-blue-900 font-semibold mb-2 flex items-center gap-2">
+                            <Users size={20} />
+                            Link Children to Root Member {!editingPerson && "(Optional)"}
+                          </label>
+                          <p className="text-sm text-blue-700 mb-3">
+                            {editingPerson 
+                              ? "Select children to link. When you select a child who has siblings, all siblings will be automatically linked."
+                              : "You can optionally link existing children to this root member. When you select a child who has siblings, all siblings will be automatically linked."
+                            }
+                          </p>
+                          
+                          {(() => {
+                            // Create a temporary root member object based on current form state
+                            // This allows us to show potential children even when changing someone to a root
+                            const currentRootMember = editingPerson 
+                              ? { ...editingPerson, parentId: formData.parentId || null }  // Use form's parent state
+                              : null;
+                            
+                            // Find potential children based on whether we're editing or adding new
+                            const potentialChildren = currentRootMember 
+                              ? findPotentialChildren(currentRootMember)
+                              : (familyData.members || []).filter(member => {
+                                  if (!member) return false;
+                                  
+                                  // When adding new root, show all members without a parent
+                                  // (including other roots, for tree reorganization)
+                                  return !member.parentId;
+                                });
+                            
+                            if (potentialChildren.length === 0) {
+                              return (
+                                <p className="text-sm text-gray-600 italic">
+                                  No potential children available to link. {!editingPerson && "You can add children later."}
+                                </p>
+                              );
+                            }
+                            
+                            return (
+                              <div className="space-y-2 max-h-60 overflow-y-auto">
+                                {potentialChildren.map(child => {
+                                  const isSelected = selectedChildrenToLink.includes(child.id);
+                                  const siblings = child.parentId ? getSiblings(child.id) : [];
+                                  const hasOtherParent = child.parentId && editingPerson && child.parentId !== editingPerson.id;
+                                  
+                                  return (
+                                    <div 
+                                      key={child.id}
+                                      className={`p-3 rounded-lg border-2 transition-all ${
+                                        isSelected 
+                                          ? 'bg-blue-100 border-blue-400' 
+                                          : 'bg-white border-gray-200 hover:border-blue-300'
+                                      }`}
+                                    >
+                                      <label className="flex items-start gap-3 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={isSelected}
+                                          onChange={(e) => {
+                                            if (e.target.checked) {
+                                              setSelectedChildrenToLink(prev => [...prev, child.id]);
+                                            } else {
+                                              setSelectedChildrenToLink(prev => prev.filter(id => id !== child.id));
+                                            }
+                                          }}
+                                          className="mt-1 w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+                                        />
+                                        <div className="flex-1">
+                                          <div className="font-semibold text-gray-800">
+                                            {child.fullName}
+                                            {child.gender === 'male' ? ' ♂' : ' ♀'}
+                                          </div>
+                                          {child.dateOfBirth && (
+                                            <div className="text-sm text-gray-600">
+                                              Born: {new Date(child.dateOfBirth).toLocaleDateString()}
+                                            </div>
+                                          )}
+                                          {siblings.length > 0 && (
+                                            <div className="text-xs text-blue-700 mt-1 bg-blue-50 px-2 py-1 rounded inline-block">
+                                              ℹ️ Has {siblings.length} sibling{siblings.length > 1 ? 's' : ''} - will be auto-linked
+                                            </div>
+                                          )}
+                                          {hasOtherParent && (
+                                            <div className="text-xs text-orange-700 mt-1 bg-orange-50 px-2 py-1 rounded inline-block">
+                                              ⚠️ Currently linked to another parent - will be updated
+                                            </div>
+                                          )}
+                                        </div>
+                                      </label>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })()}
+                          
+                          {selectedChildrenToLink.length > 0 && (
+                            <motion.div 
+                              className="mt-3 p-3 bg-green-50 border-2 border-green-200 rounded-lg"
+                              initial={{ opacity: 0, scale: 0.95 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                            >
+                              <p className="text-sm text-green-800 font-semibold">
+                                ✅ {selectedChildrenToLink.length} child{selectedChildrenToLink.length > 1 ? 'ren' : ''} selected
+                              </p>
+                            </motion.div>
+                          )}
+                        </div>
                       </motion.div>
                     )}
 
