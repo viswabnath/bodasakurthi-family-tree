@@ -47,6 +47,10 @@ const FamilyTreeApp = () => {
   const [checkingSetup, setCheckingSetup] = useState(true);
   const [selectedChildrenToLink, setSelectedChildrenToLink] = useState([]);
   const [childrenToMoveInSwap, setChildrenToMoveInSwap] = useState([]); // For parent-child swap scenario
+  // History management for undo/redo
+  const [history, setHistory] = useState([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [isUndoing, setIsUndoing] = useState(false);
 
   const [formData, setFormData] = useState({
     id: Date.now(),
@@ -276,6 +280,18 @@ const FamilyTreeApp = () => {
       children: []
     };
 
+    // Circular relationship detection
+    if (formData.parentId && detectCircularRelationship(familyData.members || [], newPerson.id, formData.parentId)) {
+      showNotification('❌ Cannot create circular relationship - this would make a person their own ancestor!', 'error', 5000);
+      return;
+    }
+
+    // Validation warnings (non-blocking)
+    const warnings = getValidationWarnings(newPerson, familyData.members || []);
+    if (warnings.length > 0) {
+      warnings.forEach(warning => showNotification(warning, 'warning', 5000));
+    }
+
     let updatedMembers = (familyData.members || []).map(member => {
       if (member && member.id === formData.parentId) {
         return {
@@ -338,10 +354,18 @@ const FamilyTreeApp = () => {
       showNotification(`✅ ${newPerson.fullName} added to family tree`, 'success');
     }
 
-    const updatedData = {
+    let updatedData = {
       ...familyData,
       members: [...updatedMembers, newPerson]
     };
+
+    // Recalculate generations if parent was added/changed
+    if (formData.parentId || selectedChildrenToLink.length > 0) {
+      updatedData.members = recalculateAllGenerations(updatedData.members);
+    }
+
+    // Save to history for undo
+    saveToHistory(familyData, `Added ${newPerson.fullName}`);
 
     setFamilyData(updatedData);
     setShowAddForm(false);
@@ -349,14 +373,36 @@ const FamilyTreeApp = () => {
     setChildrenToMoveInSwap([]);
     resetForm();
     
-    // Auto-save to database
-    await saveToDatabase(updatedData);
+    // Auto-save to database with error handling
+    try {
+      await saveToDatabase(updatedData);
+    } catch (error) {
+      // Rollback on error
+      setFamilyData(familyData);
+      showNotification('❌ Failed to save to database. Changes reverted.', 'error', 5000);
+      console.error('Database save error:', error);
+    }
   };
 
   const handleEditPerson = async () => {
     if (!validateForm()) {
       showNotification('Please fix the validation errors before submitting', 'warning');
       return;
+    }
+    
+    // Circular relationship detection
+    if (formData.parentId && formData.parentId !== editingPerson.parentId) {
+      if (detectCircularRelationship(familyData.members || [], editingPerson.id, formData.parentId)) {
+        showNotification('❌ Cannot create circular relationship - this would make a person their own ancestor!', 'error', 5000);
+        return;
+      }
+    }
+
+    // Validation warnings (non-blocking)
+    const updatedPerson = { ...formData, id: editingPerson.id };
+    const warnings = getValidationWarnings(updatedPerson, familyData.members || []);
+    if (warnings.length > 0) {
+      warnings.forEach(warning => showNotification(warning, 'warning', 5000));
     }
     
     let updatedMembers = [...familyData.members];
@@ -587,10 +633,16 @@ const FamilyTreeApp = () => {
       showNotification(`✅ ${editingPerson.fullName} updated successfully`, 'success');
     }
 
-    const updatedData = {
+    let updatedData = {
       ...familyData,
       members: updatedMembers
     };
+
+    // Recalculate generations after any parent/root changes
+    updatedData.members = recalculateAllGenerations(updatedData.members);
+
+    // Save to history for undo
+    saveToHistory(familyData, `Edited ${editingPerson.fullName}`);
 
     setFamilyData(updatedData);
     setShowAddForm(false);
@@ -599,8 +651,15 @@ const FamilyTreeApp = () => {
     setChildrenToMoveInSwap([]);
     resetForm();
     
-    // Auto-save to database
-    await saveToDatabase(updatedData);
+    // Auto-save to database with error handling
+    try {
+      await saveToDatabase(updatedData);
+    } catch (error) {
+      // Rollback on error
+      setFamilyData(familyData);
+      showNotification('❌ Failed to save to database. Changes reverted.', 'error', 5000);
+      console.error('Database save error:', error);
+    }
   };  const handleDeletePerson = async () => {
     if (!personToDelete) return;
 
@@ -613,10 +672,16 @@ const FamilyTreeApp = () => {
         parentId: member.parentId === personToDelete.id ? null : member.parentId
       }));
 
-    const updatedData = {
+    let updatedData = {
       ...familyData,
       members: updatedMembers
     };
+
+    // Recalculate generations after deletion
+    updatedData.members = recalculateAllGenerations(updatedData.members);
+
+    // Save to history for undo
+    saveToHistory(familyData, `Deleted ${personToDelete.fullName}`);
 
     setFamilyData(updatedData);
     setShowAddForm(false);
@@ -626,8 +691,15 @@ const FamilyTreeApp = () => {
     setPersonToDelete(null);
     resetForm();
     
-    // Auto-save to database
-    await saveToDatabase(updatedData);
+    // Auto-save to database with error handling
+    try {
+      await saveToDatabase(updatedData);
+    } catch (error) {
+      // Rollback on error
+      setFamilyData(familyData);
+      showNotification('❌ Failed to save to database. Changes reverted.', 'error', 5000);
+      console.error('Database save error:', error);
+    }
   };
 
   const confirmDelete = (person) => {
@@ -782,7 +854,28 @@ const FamilyTreeApp = () => {
     window.location.reload();
   };
 
-  const saveToDatabase = async (data = familyData) => {
+  const removeNotification = useCallback((id) => {
+    setNotifications(prev => prev.filter(notification => notification.id !== id));
+  }, []);
+
+  const showNotification = useCallback((message, type = 'success', duration = 3000) => {
+    const id = Date.now();
+    const notification = {
+      id,
+      message,
+      type, // 'success', 'error', 'info', 'warning'
+      duration
+    };
+    
+    setNotifications(prev => [...prev, notification]);
+    
+    // Auto-remove after duration
+    setTimeout(() => {
+      removeNotification(id);
+    }, duration);
+  }, [removeNotification]);
+
+    const saveToDatabase = useCallback(async (data = familyData) => {
     if (!isAdmin) {
       showNotification('Only admins can save changes. Please log in at /admin', 'warning');
       return;
@@ -797,7 +890,7 @@ const FamilyTreeApp = () => {
     } else {
       showNotification('❌ Save failed', 'error');
     }
-  };
+  }, [familyData, isAdmin, showNotification]);
 
 
 
@@ -859,28 +952,188 @@ const FamilyTreeApp = () => {
   };
 
   // Floating notification system
-  const showNotification = (message, type = 'success', duration = 3000) => {
-    const id = Date.now();
-    const notification = {
-      id,
-      message,
-      type, // 'success', 'error', 'info', 'warning'
-      duration
+  // ============================================================================
+  // UTILITY FUNCTIONS - Generation, Validation, History
+  // ============================================================================
+
+  // Recursive generation recalculation for deep hierarchies
+  const recalculateGenerations = useCallback((members, rootId, generation = 0) => {
+    const updatedMembers = [...members];
+    
+    // Find the root member
+    const rootMember = updatedMembers.find(m => m.id === rootId);
+    if (!rootMember) return updatedMembers;
+    
+    // Update root's generation
+    const rootIndex = updatedMembers.findIndex(m => m.id === rootId);
+    updatedMembers[rootIndex] = { ...rootMember, generation };
+    
+    // Recursively update all children
+    const children = rootMember.children || [];
+    children.forEach(childId => {
+      updatedMembers.forEach((member, index) => {
+        if (member.id === childId) {
+          updatedMembers[index] = { ...member, generation: generation + 1 };
+          // Recursively update this child's descendants
+          const updated = recalculateGenerations(updatedMembers, childId, generation + 1);
+          updatedMembers.splice(0, updatedMembers.length, ...updated);
+        }
+      });
+    });
+    
+    return updatedMembers;
+  }, []);
+
+  // Recalculate all generations in the tree
+  const recalculateAllGenerations = useCallback((members) => {
+    let updatedMembers = [...members];
+    
+    // Find all root members (no parent)
+    const roots = updatedMembers.filter(m => !m.parentId);
+    
+    // Recalculate generations for each root tree
+    roots.forEach(root => {
+      updatedMembers = recalculateGenerations(updatedMembers, root.id, 0);
+    });
+    
+    return updatedMembers;
+  }, [recalculateGenerations]);
+
+  // Detect circular relationships
+  const detectCircularRelationship = useCallback((members, childId, parentId) => {
+    // Check if parentId is already a descendant of childId
+    const isDescendant = (ancestorId, descendantId, visited = new Set()) => {
+      if (ancestorId === descendantId) return true;
+      if (visited.has(ancestorId)) return false; // Prevent infinite loops
+      
+      visited.add(ancestorId);
+      
+      const ancestor = members.find(m => m.id === ancestorId);
+      if (!ancestor || !ancestor.children || ancestor.children.length === 0) return false;
+      
+      // Check all children
+      return ancestor.children.some(childId => isDescendant(childId, descendantId, visited));
     };
     
-    setNotifications(prev => [...prev, notification]);
+    return isDescendant(childId, parentId);
+  }, []);
+
+  // Validation warnings (non-blocking)
+  const getValidationWarnings = useCallback((member, members) => {
+    const warnings = [];
     
-    // Auto-remove after duration
-    setTimeout(() => {
-      removeNotification(id);
-    }, duration);
-  };
+    // Age validation - child born before parent
+    if (member.parentId && member.dateOfBirth) {
+      const parent = members.find(m => m.id === member.parentId);
+      if (parent && parent.dateOfBirth) {
+        const childBirth = new Date(member.dateOfBirth);
+        const parentBirth = new Date(parent.dateOfBirth);
+        const ageDiff = (childBirth - parentBirth) / (1000 * 60 * 60 * 24 * 365); // years
+        
+        if (ageDiff < 13) {
+          warnings.push(`⚠️ Parent was only ${Math.floor(ageDiff)} years old when child was born`);
+        }
+        if (childBirth < parentBirth) {
+          warnings.push('⚠️ Child born before parent');
+        }
+      }
+    }
+    
+    // Death date before birth date
+    if (member.dateOfBirth && member.dateOfDeath) {
+      const birth = new Date(member.dateOfBirth);
+      const death = new Date(member.dateOfDeath);
+      if (death < birth) {
+        warnings.push('⚠️ Death date is before birth date');
+      }
+    }
+    
+    // Duplicate name warning
+    const duplicates = members.filter(m => 
+      m.id !== member.id && 
+      m.fullName.toLowerCase() === member.fullName.toLowerCase()
+    );
+    if (duplicates.length > 0) {
+      warnings.push(`⚠️ Another member with name "${member.fullName}" already exists`);
+    }
+    
+    // Generation inconsistency
+    if (member.parentId) {
+      const parent = members.find(m => m.id === member.parentId);
+      if (parent && member.generation !== parent.generation + 1) {
+        warnings.push(`⚠️ Generation mismatch (Parent: Gen ${parent.generation}, Child: Gen ${member.generation})`);
+      }
+    }
+    
+    return warnings;
+  }, []);
 
-  const removeNotification = (id) => {
-    setNotifications(prev => prev.filter(notification => notification.id !== id));
-  };
+  // Save state to history for undo
+  const saveToHistory = useCallback((data, action) => {
+    if (isUndoing) return; // Don't save history during undo operations
+    
+    const newHistoryEntry = {
+      data: JSON.parse(JSON.stringify(data)), // Deep clone
+      action,
+      timestamp: Date.now()
+    };
+    
+    // Remove any history after current index (when user makes new change after undo)
+    const newHistory = history.slice(0, historyIndex + 1);
+    newHistory.push(newHistoryEntry);
+    
+    // Keep only last 10 entries
+    const trimmedHistory = newHistory.slice(-10);
+    
+    setHistory(trimmedHistory);
+    setHistoryIndex(trimmedHistory.length - 1);
+  }, [history, historyIndex, isUndoing]);
 
-  // Helper function to check if a person is the root member
+  // Undo last action
+  const handleUndo = useCallback(async () => {
+    if (historyIndex <= 0) {
+      showNotification('Nothing to undo', 'info');
+      return;
+    }
+    
+    setIsUndoing(true);
+    const previousState = history[historyIndex - 1];
+    
+    setFamilyData(previousState.data);
+    setHistoryIndex(historyIndex - 1);
+    
+    // Save to database
+    await saveToDatabase(previousState.data);
+    
+    showNotification(`↶ Undone: ${previousState.action}`, 'success', 3000);
+    setIsUndoing(false);
+  }, [historyIndex, history, saveToDatabase, showNotification]);
+
+  // Redo action
+  const handleRedo = useCallback(async () => {
+    if (historyIndex >= history.length - 1) {
+      showNotification('Nothing to redo', 'info');
+      return;
+    }
+    
+    setIsUndoing(true);
+    const nextState = history[historyIndex + 1];
+    
+    setFamilyData(nextState.data);
+    setHistoryIndex(historyIndex + 1);
+    
+    // Save to database
+    await saveToDatabase(nextState.data);
+    
+    showNotification(`↷ Redone: ${nextState.action}`, 'success', 3000);
+    setIsUndoing(false);
+  }, [historyIndex, history, saveToDatabase, showNotification]);
+
+  // ============================================================================
+  // EXISTING HELPER FUNCTIONS
+  // ============================================================================
+
+    // Helper function to check if a person is the root member
   const isRootMember = (person) => {
     return !person.parentId || person.generation === 0;
   };
@@ -1075,9 +1328,9 @@ const FamilyTreeApp = () => {
     // Calculate responsive layout for mobile and desktop
     const isMobile = window.innerWidth < 768;
     const cardWidth = isMobile ? 180 : 240;
-    const cardSpacing = isMobile ? 20 : 30; // Spacing between cards
+    const cardSpacing = isMobile ? 30 : 50; // Spacing between cards - increased for better separation
     const startX = isMobile ? 20 : 50;
-    const generationY = isMobile ? 80 + person.generation * 240 : 100 + person.generation * 260;
+    const generationY = isMobile ? 80 + person.generation * 260 : 100 + person.generation * 300;
     
     // Simple horizontal positioning - arrange people in each generation side by side
     // but keep family groups together and sort children within families by birth date
@@ -1098,7 +1351,7 @@ const FamilyTreeApp = () => {
     // Gender-based styling
     const isMale = person.gender === 'male';
     const cardWidthPx = isMobile ? '180px' : '240px'; // Match positioning logic
-    const cardHeight = isMobile ? '200px' : '240px';
+    const cardHeight = isMobile ? '220px' : '260px';
 
     return (
       <motion.div
@@ -1161,8 +1414,8 @@ const FamilyTreeApp = () => {
             )}
           </div>
           <div className="flex-1 relative z-10">
-            <h3 className="text-base font-bold text-amber-900 mb-1 leading-tight line-clamp-2">
-              {person.fullName}
+            <h3 className="text-base font-bold text-amber-900 mb-1 leading-tight line-clamp-2 cursor-default" title={person.fullName}>
+                  {person.fullName}
             </h3>
             <div className="space-y-0.5 text-xs">
               {person.dateOfBirth && (
@@ -1177,9 +1430,9 @@ const FamilyTreeApp = () => {
               )}
             </div>
           </div>
-          <div className="mt-auto pt-2 relative z-10">
+          <div className="mt-auto pt-1 relative z-10">
             {/* Compact info badges - stacked vertically to prevent wrapping */}
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               {/* First row: Living status and marriage */}
               <div className="flex items-center gap-1">
                 {person.isLiving && (
@@ -1196,9 +1449,9 @@ const FamilyTreeApp = () => {
               </div>
               {/* Second row: Children count */}
               {childrenInfo.length > 0 && (
-                <div className="flex items-center gap-1 text-xs text-blue-700 bg-blue-50/80 rounded-full px-2 py-0.5 border border-blue-200 w-fit">
-                  <Users size={8} className="text-blue-600" />
-                  <span className="font-medium">{childrenInfo.length} {childrenInfo.length === 1 ? 'child' : 'children'}</span>
+                <div className="flex items-center gap-0.5 text-[10px] text-blue-700 bg-blue-50/80 rounded-full px-1.5 py-0.5 border border-blue-200 w-fit">
+                  <Users size={10} className="text-blue-600 flex-shrink-0" />
+                  <span className="font-medium whitespace-nowrap">{childrenInfo.length} {childrenInfo.length === 1 ? 'child' : 'children'}</span>
                 </div>
               )}
             </div>
@@ -1448,23 +1701,23 @@ const FamilyTreeApp = () => {
           backgroundPosition: '0 0, 0 30px, 30px -30px, -30px 0px'
         }}></div>
         
-        <div className="text-center animate-fade-in relative z-10">
-          <div className="mb-8">
+        <div className="text-center animate-fade-in relative z-10 px-4">
+          <div className="mb-6 sm:mb-8">
             <div className="relative">
-              <Home size={80} className="mx-auto text-amber-100 animate-pulse drop-shadow-2xl" />
-              <div className="absolute inset-0 mx-auto w-20 h-20 bg-amber-100/20 rounded-full blur-xl"></div>
+              <Home size={60} className="mx-auto text-amber-100 animate-pulse drop-shadow-2xl sm:w-20 sm:h-20" />
+              <div className="absolute inset-0 mx-auto w-16 h-16 sm:w-20 sm:h-20 bg-amber-100/20 rounded-full blur-xl"></div>
             </div>
           </div>
-          <h1 className="text-6xl font-bold text-amber-50 mb-4 font-serif drop-shadow-2xl">
+          <h1 className="text-3xl sm:text-5xl md:text-6xl font-bold text-amber-50 mb-3 sm:mb-4 font-serif drop-shadow-2xl leading-tight">
             The {familyData.surname}
           </h1>
-          <p className="text-2xl text-amber-200 mb-12 italic drop-shadow-lg">A Living House of Memories</p>
+          <p className="text-lg sm:text-xl md:text-2xl text-amber-200 mb-8 sm:mb-12 italic drop-shadow-lg px-4">A Living House of Memories</p>
           
           <button
             onClick={enterHouse}
-            className="group relative px-12 py-5 bg-gradient-to-r from-amber-100 to-yellow-100 text-amber-900 text-xl font-bold rounded-xl shadow-2xl hover:shadow-amber-900/50 transition-all duration-500 transform hover:scale-110 border-4 border-amber-800 backdrop-blur-sm"
+            className="group relative px-8 py-4 sm:px-12 sm:py-5 bg-gradient-to-r from-amber-100 to-yellow-100 text-amber-900 text-lg sm:text-xl font-bold rounded-xl shadow-2xl hover:shadow-amber-900/50 transition-all duration-500 transform hover:scale-110 border-4 border-amber-800 backdrop-blur-sm"
           >
-            <span className="flex items-center gap-3">
+            <span className="flex items-center gap-2 sm:gap-3">
               Open the Door
               <span className="group-hover:translate-x-2 transition-transform duration-300">→</span>
             </span>
@@ -1530,18 +1783,18 @@ const FamilyTreeApp = () => {
         backgroundImage: `repeating-linear-gradient(45deg, rgba(0,0,0,0.02) 0px, rgba(0,0,0,0.02) 1px, transparent 1px, transparent 12px)`,
       }}></div>
 
-      <div className="absolute top-0 left-0 right-0 bg-gradient-to-r from-amber-900 via-orange-900 to-amber-900 text-amber-50 p-6 shadow-2xl z-30 border-b-4 border-amber-700 backdrop-blur-sm">
+      <div className="absolute top-0 left-0 right-0 bg-gradient-to-r from-amber-900 via-orange-900 to-amber-900 text-amber-50 p-3 sm:p-6 shadow-2xl z-30 border-b-4 border-amber-700 backdrop-blur-sm">
         {/* Header with enhanced styling */}
         <div className="absolute inset-0 bg-gradient-to-r from-amber-800/50 to-orange-800/50"></div>
-        <div className="flex justify-between items-center max-w-7xl mx-auto relative z-10">
-          <div className="flex items-center gap-4">
+        <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-2 sm:gap-4 max-w-7xl mx-auto relative z-10">
+          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
             {showSurnameEdit ? (
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                 <input
                   type="text"
                   value={tempSurname}
                   onChange={(e) => setTempSurname(e.target.value)}
-                  className="text-xl font-bold bg-white text-amber-900 border border-amber-300 rounded px-2 py-1"
+                  className="text-base sm:text-xl font-bold bg-white text-amber-900 border border-amber-300 rounded px-2 py-1 w-32 sm:w-auto"
                   placeholder="Family Name"
                   onKeyPress={(e) => e.key === 'Enter' && saveSurname()}
                   autoFocus
@@ -1549,7 +1802,7 @@ const FamilyTreeApp = () => {
                 <select
                   value={tempSurnameFormat}
                   onChange={(e) => setTempSurnameFormat(e.target.value)}
-                  className="bg-white text-amber-900 border border-amber-300 rounded px-2 py-1 text-sm"
+                  className="bg-white text-amber-900 border border-amber-300 rounded px-1.5 sm:px-2 py-1 text-xs sm:text-sm"
                 >
                   <option value="">Select Suffix</option>
                   <option value="possessive">
@@ -1567,19 +1820,19 @@ const FamilyTreeApp = () => {
                   className="p-1 text-green-400 hover:text-green-300"
                   title="Save"
                 >
-                  <Check size={20} />
+                  <Check size={18} className="sm:w-5 sm:h-5" />
                 </button>
                 <button
                   onClick={cancelSurnameEdit}
                   className="p-1 text-red-400 hover:text-red-300"
                   title="Cancel"
                 >
-                  <X size={20} />
+                  <X size={18} className="sm:w-5 sm:h-5" />
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-2">
-                <h2 className="text-3xl font-bold font-serif">{familyData.surname}</h2>
+              <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                <h2 className="text-xl sm:text-2xl md:text-3xl font-bold font-serif truncate">{familyData.surname}</h2>
                 {isAdmin && (
                   <button
                     onClick={handleSurnameEdit}
@@ -1593,7 +1846,7 @@ const FamilyTreeApp = () => {
             )}
           </div>
           
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-3 justify-center sm:justify-end">
 
             {isAdmin && (
               <button
@@ -1602,31 +1855,48 @@ const FamilyTreeApp = () => {
                   setEditingPerson(null);
                   setShowAddForm(true);
                 }}
-                className="control-btn bg-green-700 hover:bg-green-600 px-4 py-2 rounded-lg transition-all flex items-center gap-2"
+                className="control-btn bg-green-700 hover:bg-green-600 px-3 sm:px-4 py-2 rounded-lg transition-all flex items-center gap-1.5 sm:gap-2 text-sm sm:text-base shadow-md hover:shadow-lg"
               >
-                <Plus size={20} />
-                Add Member
+                <Plus size={18} className="sm:w-5 sm:h-5" />
+                <span className="hidden sm:inline">Add Member</span>
+                <span className="sm:hidden">Add</span>
               </button>
+            )}
+            
+            {isAdmin && (
+              <>
+                <button
+                  onClick={handleUndo}
+                  disabled={historyIndex <= 0}
+                  className="control-btn bg-blue-700 hover:bg-blue-600 disabled:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed px-2.5 sm:px-3 py-2 rounded-lg transition-all flex items-center gap-1.5 sm:gap-2 text-sm sm:text-base shadow-md hover:shadow-lg"
+                  title={historyIndex <= 0 ? "Nothing to undo" : `Undo: ${history[historyIndex - 1]?.action || ''}`}
+                >
+                  <span className="text-base sm:text-lg">↶</span>
+                  <span className="hidden sm:inline">Undo</span>
+                </button>
+                <button
+                  onClick={handleRedo}
+                  disabled={historyIndex >= history.length - 1}
+                  className="control-btn bg-blue-700 hover:bg-blue-600 disabled:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed px-2.5 sm:px-3 py-2 rounded-lg transition-all flex items-center gap-1.5 sm:gap-2 text-sm sm:text-base shadow-md hover:shadow-lg"
+                  title={historyIndex >= history.length - 1 ? "Nothing to redo" : `Redo: ${history[historyIndex + 1]?.action || ''}`}
+                >
+                  <span className="text-base sm:text-lg">↷</span>
+                  <span className="hidden sm:inline">Redo</span>
+                </button>
+              </>
             )}
             
             {isAdmin && (
               <button
                 onClick={handleAdminLogout}
-                className="control-btn bg-red-700 hover:bg-red-600 px-4 py-2 rounded-lg transition-all flex items-center gap-2"
+                className="control-btn bg-red-700 hover:bg-red-600 px-3 sm:px-4 py-2 rounded-lg transition-all flex items-center gap-1.5 sm:gap-2 text-sm sm:text-base shadow-md hover:shadow-lg"
               >
-                <LogOut size={20} />
-                Logout
+                <LogOut size={18} className="sm:w-5 sm:h-5" />
+                <span className="hidden sm:inline">Logout</span>
+                <span className="sm:hidden">Exit</span>
               </button>
             )}
-            {!isAdmin && (
-              <button
-                onClick={exitHouse}
-                className="control-btn hover:bg-amber-800 px-4 py-2 rounded-lg transition-all flex items-center gap-2"
-              >
-                <LogOut size={20} />
-                Exit
-              </button>
-            )}
+
             
 
           </div>
@@ -1691,20 +1961,36 @@ const FamilyTreeApp = () => {
             {Math.round(zoom * 100)}%
           </span>
         </motion.div>
+        
+        {/* Exit Button - Only for non-admin users */}
+        {!isAdmin && (
+          <motion.button
+            onClick={exitHouse}
+            className="bg-red-600 hover:bg-red-700 text-white backdrop-blur-sm rounded-lg shadow-xl border border-red-700 w-12 h-12 flex items-center justify-center transition-all"
+            title="Exit"
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.6 }}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            <LogOut size={18} strokeWidth={2.5} />
+          </motion.button>
+        )}
       </div>
 
       <div
-        className={`absolute inset-0 pt-24 family-tree-container ${isTouchDevice ? 'overflow-auto' : 'cursor-move overflow-hidden'}`}
-        onMouseDown={!isTouchDevice ? handleMouseDown : undefined}
-        onMouseMove={!isTouchDevice ? handleMouseMove : undefined}
-        onMouseUp={!isTouchDevice ? handleMouseUp : undefined}
-        onMouseLeave={!isTouchDevice ? handleMouseUp : undefined}
-        onTouchStart={!isTouchDevice ? handleMouseDown : undefined}
-        onTouchMove={!isTouchDevice ? handleMouseMove : undefined}
-        onTouchEnd={!isTouchDevice ? handleMouseUp : undefined}
+        className="absolute inset-0 pt-24 family-tree-container cursor-move overflow-hidden"
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onTouchStart={handleMouseDown}
+        onTouchMove={handleMouseMove}
+        onTouchEnd={handleMouseUp}
         style={{
-          WebkitOverflowScrolling: isTouchDevice ? 'touch' : 'auto',
-          touchAction: isTouchDevice ? 'pan-x pan-y' : 'none'
+          WebkitOverflowScrolling: 'auto',
+          touchAction: 'none'
         }}
       >
         {familyData.members.length === 0 ? (
@@ -1754,14 +2040,14 @@ const FamilyTreeApp = () => {
           <div className="w-full h-full relative">
             <div
               style={{
-                transform: isTouchDevice ? `scale(${zoom})` : `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
                 transformOrigin: 'center center',
                 transition: isDragging ? 'none' : 'transform 0.3s ease',
-                width: isTouchDevice ? 'max-content' : '3000px',
-                height: isTouchDevice ? 'max-content' : '2500px',
-                minWidth: isTouchDevice ? `${100 * zoom}vw` : '3000px',
-                minHeight: isTouchDevice ? `${100 * zoom}vh` : '2500px',
-                padding: isTouchDevice ? '20px' : '0'
+                width: '3000px',
+                height: '2500px',
+                minWidth: '3000px',
+                minHeight: '2500px',
+                padding: '0'
               }}
               className="relative"
             >
@@ -1770,8 +2056,8 @@ const FamilyTreeApp = () => {
                 style={{ 
                   width: '100%', 
                   height: '100%',
-                  minWidth: isTouchDevice ? `${200 * zoom}vw` : 'auto',
-                  minHeight: isTouchDevice ? `${150 * zoom}vh` : 'auto'
+                  minWidth: 'auto',
+                  minHeight: 'auto'
                 }}
               >
                 {renderConnections()}
@@ -1792,7 +2078,7 @@ const FamilyTreeApp = () => {
                 onClick={() => setSelectedPerson(null)}
                 className="hover:bg-amber-800 p-2 rounded-lg transition-all"
               >
-                <X size={20} />
+                <X size={18} className="sm:w-5 sm:h-5" />
               </button>
             </div>
             
@@ -1958,7 +2244,7 @@ const FamilyTreeApp = () => {
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}
                           >
-                            <X size={20} />
+                            <X size={18} className="sm:w-5 sm:h-5" />
                             Remove
                           </motion.button>
                         )}
@@ -2566,7 +2852,7 @@ const FamilyTreeApp = () => {
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                   >
-                    <X size={20} />
+                    <X size={18} className="sm:w-5 sm:h-5" />
                     Cancel
                   </motion.button>
                 </motion.div>
@@ -2672,7 +2958,7 @@ const FamilyTreeApp = () => {
                   onClick={cancelDelete}
                   className="flex-1 bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-6 rounded-lg transition-all flex items-center justify-center gap-2"
                 >
-                  <X size={20} />
+                  <X size={18} className="sm:w-5 sm:h-5" />
                   Cancel
                 </button>
                 <button

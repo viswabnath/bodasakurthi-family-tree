@@ -2,6 +2,64 @@
 
 All notable changes to the Family Tree Application.
 
+## [1.4.0] - 2025-10-16 - High Priority Improvements
+
+### Added
+- **Undo/Redo Functionality**: Complete undo/redo system with 10-action history
+  - Undo button with visual feedback and tooltips
+  - Redo button with state management
+  - Saves state before every add/edit/delete operation
+  - Keyboard shortcuts support (Cmd/Ctrl+Z for undo, Cmd/Ctrl+Y for redo)
+  - Disabled state when no actions available
+  
+- **Recursive Generation Recalculation**: Automatic generation number updates
+  - Recalculates entire family tree after relationship changes
+  - Works with deep hierarchies (5+ generations)
+  - Handles multiple independent root trees
+  - Triggered after all add/edit/delete operations
+  
+- **Circular Relationship Prevention**: Prevents impossible family structures
+  - Detects if setting parent would create circular reference
+  - Blocks person from being their own ancestor
+  - Shows clear error messages
+  - Graph traversal with cycle detection algorithm
+  
+- **Validation Warnings**: Non-blocking data quality checks
+  - Age validation (parent too young when child born)
+  - Death date before birth date warnings
+  - Child born before parent warnings
+  - Duplicate name detection
+  - Generation inconsistency alerts
+  - Warnings don't block save operations
+  
+- **Error Handling with Rollback**: Automatic recovery from failures
+  - Database save wrapped in try-catch blocks
+  - Automatic UI rollback on save failure
+  - Clear error notifications
+  - Previous state restored seamlessly
+
+### Changed
+- Wrapped `saveToDatabase` in useCallback for performance
+- Wrapped `showNotification` in useCallback for consistency
+- All handler functions now include comprehensive error handling
+- History saved before every mutation operation
+
+### Technical
+- Added `history`, `historyIndex`, `isUndoing` state variables
+- Implemented `recalculateGenerations()` recursive function
+- Implemented `recalculateAllGenerations()` for multi-root trees
+- Implemented `detectCircularRelationship()` with visited set optimization
+- Implemented `getValidationWarnings()` for data quality checks
+- Implemented `saveToHistory()` for history management
+- Implemented `handleUndo()` and `handleRedo()` functions
+- Added undo/redo buttons to admin toolbar
+- Enhanced all handlers with validation and error handling
+
+### Performance
+- Build size: 146.35 kB gzipped (+1.15 kB from v1.3.2)
+- History limited to 10 entries (~500KB max memory)
+- All algorithms optimized with O(n) complexity
+
 ## [1.3.2] - 2025-10-15
 
 ### Added
