@@ -2056,56 +2056,7 @@ const FamilyTreeApp = () => {
           
           <div className="flex flex-wrap items-center gap-1.5 sm:gap-3 justify-center sm:justify-end">
 
-            {isAdmin && (
-              <button
-                onClick={() => {
-                  resetForm();
-                  setEditingPerson(null);
-                  setShowAddForm(true);
-                }}
-                className="control-btn bg-green-700 hover:bg-green-600 px-3 sm:px-4 py-2 rounded-lg transition-all flex items-center gap-1.5 sm:gap-2 text-sm sm:text-base shadow-md hover:shadow-lg"
-              >
-                <Plus size={18} className="sm:w-5 sm:h-5" />
-                <span className="hidden sm:inline">Add Member</span>
-                <span className="sm:hidden">Add</span>
-              </button>
-            )}
-            
-            {isAdmin && (
-              <>
-                <button
-                  onClick={handleUndo}
-                  disabled={historyIndex <= 0}
-                  className="control-btn bg-blue-700 hover:bg-blue-600 disabled:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed px-2.5 sm:px-3 py-2 rounded-lg transition-all flex items-center gap-1.5 sm:gap-2 text-sm sm:text-base shadow-md hover:shadow-lg"
-                  title={historyIndex <= 0 ? "Nothing to undo" : `Undo: ${history[historyIndex - 1]?.action || ''}`}
-                >
-                  <span className="text-base sm:text-lg">↶</span>
-                  <span className="hidden sm:inline">Undo</span>
-                </button>
-                <button
-                  onClick={handleRedo}
-                  disabled={historyIndex >= history.length - 1}
-                  className="control-btn bg-blue-700 hover:bg-blue-600 disabled:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed px-2.5 sm:px-3 py-2 rounded-lg transition-all flex items-center gap-1.5 sm:gap-2 text-sm sm:text-base shadow-md hover:shadow-lg"
-                  title={historyIndex >= history.length - 1 ? "Nothing to redo" : `Redo: ${history[historyIndex + 1]?.action || ''}`}
-                >
-                  <span className="text-base sm:text-lg">↷</span>
-                  <span className="hidden sm:inline">Redo</span>
-                </button>
-              </>
-            )}
-            
-            {isAdmin && (
-              <button
-                onClick={handleAdminLogout}
-                className="control-btn bg-red-700 hover:bg-red-600 px-3 sm:px-4 py-2 rounded-lg transition-all flex items-center gap-1.5 sm:gap-2 text-sm sm:text-base shadow-md hover:shadow-lg"
-              >
-                <LogOut size={18} className="sm:w-5 sm:h-5" />
-                <span className="hidden sm:inline">Logout</span>
-                <span className="sm:hidden">Exit</span>
-              </button>
-            )}
-
-            
+            {/* All action buttons moved to bottom-right floating controls for better accessibility */}
 
           </div>
         </div>
@@ -2135,28 +2086,78 @@ const FamilyTreeApp = () => {
             <span className="text-lg font-bold leading-none select-none">−</span>
           </button>
         </motion.div>
-        
-        {/* Reset View Button */}
-        <motion.button
-          onClick={() => {
-            setZoom(0.8);
-            setPan({ x: 0, y: 0 });
-            // On mobile, also scroll to top
-            if (isTouchDevice) {
-              const container = document.querySelector('.family-tree-container');
-              if (container) {
-                container.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+        {/* Floating action group (Add Member, Undo/Redo, Home, Exit/Logout) */}
+        <div className="flex flex-col gap-2 mt-2 items-end">
+          {isAdmin && (
+            <button
+              onClick={() => {
+                resetForm();
+                setEditingPerson(null);
+                setShowAddForm(true);
+              }}
+              className="bg-green-600 hover:bg-green-500 text-white w-12 h-12 rounded-lg shadow-lg flex items-center justify-center transition-transform hover:scale-105"
+              title="Add Member"
+            >
+              <Plus size={18} />
+            </button>
+          )}
+
+          {isAdmin && (
+            <>
+              <button
+                onClick={handleUndo}
+                disabled={historyIndex <= 0}
+                className={`w-12 h-12 rounded-lg shadow-lg flex items-center justify-center transition-transform hover:scale-105 ${
+                  historyIndex <= 0 
+                    ? 'bg-gray-400 text-gray-600 cursor-not-allowed' 
+                    : 'bg-blue-600 hover:bg-blue-500 text-white'
+                }`}
+                title={historyIndex <= 0 ? "Nothing to undo" : `Undo: ${history[historyIndex - 1]?.action || ''}`}
+              >
+                <span className="text-lg">↶</span>
+              </button>
+              <button
+                onClick={handleRedo}
+                disabled={historyIndex >= history.length - 1}
+                className={`w-12 h-12 rounded-lg shadow-lg flex items-center justify-center transition-transform hover:scale-105 ${
+                  historyIndex >= history.length - 1 
+                    ? 'bg-gray-400 text-gray-600 cursor-not-allowed' 
+                    : 'bg-blue-600 hover:bg-blue-500 text-white'
+                }`}
+                title={historyIndex >= history.length - 1 ? "Nothing to redo" : `Redo: ${history[historyIndex + 1]?.action || ''}`}
+              >
+                <span className="text-lg">↷</span>
+              </button>
+            </>
+          )}
+
+          {/* Reset View button */}
+          <button
+            onClick={() => {
+              setZoom(0.8);
+              setPan({ x: 0, y: 0 });
+              if (isTouchDevice) {
+                const container = document.querySelector('.family-tree-container');
+                if (container) {
+                  container.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+                }
               }
-            }
-          }}
-          className="bg-white/98 backdrop-blur-sm rounded-lg shadow-xl border border-gray-300 w-12 h-12 flex items-center justify-center hover:bg-gray-50 active:bg-gray-100 transition-all text-gray-600 hover:text-gray-800"
-          title="Reset View"
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.4 }}
-        >
-          <Home size={16} strokeWidth={2.5} />
-        </motion.button>
+            }}
+            className="bg-white/98 backdrop-blur-sm border border-gray-300 w-12 h-12 rounded-lg shadow-lg flex items-center justify-center hover:bg-gray-50 transition-transform hover:scale-105 text-gray-600"
+            title="Reset View"
+          >
+            <Home size={16} strokeWidth={2.5} />
+          </button>
+
+          {/* Exit/Logout Button */}
+          <button
+            onClick={isAdmin ? handleAdminLogout : exitHouse}
+            className="bg-red-600 hover:bg-red-500 text-white w-12 h-12 rounded-lg shadow-lg flex items-center justify-center transition-transform hover:scale-105"
+            title={isAdmin ? "Logout" : "Exit"}
+          >
+            <LogOut size={18} strokeWidth={2.5} />
+          </button>
+        </div>
         
         {/* Zoom Level Indicator */}
         <motion.div 
@@ -2169,22 +2170,6 @@ const FamilyTreeApp = () => {
             {Math.round(zoom * 100)}%
           </span>
         </motion.div>
-        
-        {/* Exit Button - Only for non-admin users */}
-        {!isAdmin && (
-          <motion.button
-            onClick={exitHouse}
-            className="bg-red-600 hover:bg-red-700 text-white backdrop-blur-sm rounded-lg shadow-xl border border-red-700 w-12 h-12 flex items-center justify-center transition-all"
-            title="Exit"
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.6 }}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-          >
-            <LogOut size={18} strokeWidth={2.5} />
-          </motion.button>
-        )}
       </div>
 
       <div

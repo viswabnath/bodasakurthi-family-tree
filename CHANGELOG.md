@@ -2,41 +2,65 @@
 
 All notable changes to the Family Tree Application.
 
-## [1.5.0] - 2025-10-17 - Advanced Marriage & Children Management
+## [1.5.0] - 2025-10-17 - Multiple Marriage System & UI Reorganization
 
 ### Added
-- **Multiple Marriage Support**: Complete redesign of marriage system
-  - Support for divorced, widowed, and remarried individuals
-  - Advanced marriage form with multiple marriage entries
-  - Smart toggle between simple and advanced marriage modes
-  - Marriage status tracking (Current, Divorced, Widowed)
-  - Marriage and end date management
+- **Multiple Marriage Support**: Complete multiple marriage tracking system
+  - Support for divorced, widowed, and remarried scenarios
+  - Advanced marriage toggle for complex relationship management
+  - Marriage status tracking (current, divorced, widowed)
+  - Child-to-marriage assignment with intelligent distribution
+  - Automatic migration from simple spouse format to marriage array
+  - Shows "0 children" for married couples without children
 
-- **Enhanced Children Management**: Children-to-marriage assignment system
-  - Individual child assignment to specific marriages
-  - Intelligent auto-distribution based on birth dates and marriage periods
-  - Visual child assignment interface with checkboxes per marriage
-  - Real-time child count updates per marriage
-  - Support for children from different relationships
+- **Enhanced UI Control System**: Reorganized interface for better accessibility
+  - Moved all action buttons to bottom-right floating control panel
+  - Clean header navigation with only family name display
+  - Organized floating controls: Add, Undo, Redo, Home, Exit/Logout
+  - Improved mobile accessibility with touch-friendly controls
+  - Fixed duplicate button issues and streamlined control layout
 
-- **Improved Person Display**: Enhanced visualization for complex families
-  - Marriage history display with status badges
-  - Children organized by marriage relationship
-  - "0 children" display for married couples without children
-  - Color-coded marriage status indicators
-  - Support for multiple spouse relationships
+- **Advanced Form Management**: Enhanced person editing capabilities
+  - Multi-marriage form interface for complex relationships
+  - Child assignment UI for linking children to specific marriages
+  - Automatic form field enabling based on existing data
+  - Smart validation for marriage data consistency
 
 ### Enhanced
-- **Person Cards**: Now show current spouse and total children count
-- **Detailed Person View**: Complete marriage history with dates and children breakdown
-- **Form Validation**: Context-aware validation for multiple marriages
-- **Data Migration**: Automatic conversion of legacy single-marriage data
+- **Family Tree Display**: Improved visual representation
+  - Marriage information displayed on person cards
+  - Child-to-marriage mapping with clear visual indicators
+  - Enhanced person cards with marriage status and spouse details
+  - Responsive design optimized for mobile, tablet, and desktop
 
-### Technical Improvements
-- **Smart Data Distribution**: Algorithms for child-to-marriage assignment
-- **Backward Compatibility**: Seamless handling of existing family data
-- **Enhanced Helper Functions**: Marriage management utilities
-- **Real-time Updates**: Dynamic form interactions and count updates
+- **Data Structure Evolution**: Advanced relationship modeling
+  ```javascript
+  // Before: Simple spouse string
+  spouse: "John Doe"
+  
+  // After: Complex marriage array
+  marriages: [
+    {
+      spouseName: "John Doe",
+      status: "current",
+      marriageDate: "2020-01-15", 
+      children: ["child-id-1", "child-id-2"]
+    }
+  ]
+  ```
+
+### Fixed
+- Duplicate home/reset button in bottom-right controls
+- Header navigation button overcrowding on mobile devices
+- Control button organization and accessibility issues
+- Marriage data consistency during form submissions
+
+### Technical
+- Added `showAdvancedMarriages` state for complex relationship toggle
+- Implemented marriage array structure with backward compatibility
+- Enhanced form validation for multi-marriage scenarios
+- Improved mobile responsive design patterns
+- Streamlined floating control architecture
 
 ## [1.4.0] - 2025-10-16 - High Priority Improvements
 
