@@ -47,6 +47,7 @@ const FamilyTreeApp = () => {
   const [checkingSetup, setCheckingSetup] = useState(true);
   const [selectedChildrenToLink, setSelectedChildrenToLink] = useState([]);
   const [childrenToMoveInSwap, setChildrenToMoveInSwap] = useState([]); // For parent-child swap scenario
+  const [showAdvancedMarriages, setShowAdvancedMarriages] = useState(false);
   // History management for undo/redo
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -60,8 +61,9 @@ const FamilyTreeApp = () => {
     dateOfDeath: '',
     isLiving: true,
     maritalStatus: 'single',
-    spouseName: '',
-    dateOfMarriage: '',
+    spouseName: '', // Keep for backward compatibility
+    dateOfMarriage: '', // Keep for backward compatibility
+    marriages: [], // New: Array of marriage objects
     children: [],
     birthStar: '',
     nicknames: '',
@@ -219,15 +221,25 @@ const FamilyTreeApp = () => {
       }
     }
     
-    // Marriage validation - only if married
-    if (data.maritalStatus === 'married') {
-      if (!data.spouseName.trim()) {
-        errors.spouseName = 'Spouse name is required for married persons';
+    // Marriage validation - for married/divorced/widowed persons
+    if (data.maritalStatus !== 'single') {
+      // Validate simple marriage mode
+      if (!showAdvancedMarriages) {
+        if (!data.spouseName.trim()) {
+          errors.spouseName = 'Spouse name is required';
+        }
+      } else {
+        // Validate advanced marriages mode
+        if (data.marriages && data.marriages.length > 0) {
+          data.marriages.forEach((marriage, index) => {
+            if (!marriage.spouseName || !marriage.spouseName.trim()) {
+              errors[`marriage_${index}_spouse`] = `Spouse name is required for marriage ${index + 1}`;
+            }
+          });
+        }
       }
       
-      if (!data.dateOfMarriage) {
-        errors.dateOfMarriage = 'Marriage date is required for married persons';
-      } else {
+      if (!showAdvancedMarriages && data.dateOfMarriage) {
         const birthDate = new Date(data.dateOfBirth);
         const marriageDate = new Date(data.dateOfMarriage);
         
@@ -274,8 +286,45 @@ const FamilyTreeApp = () => {
       return;
     }
     
+    // Process marriage data based on mode
+    const processedMarriageData = showAdvancedMarriages ? {
+      marriages: formData.marriages || [],
+      // Update marital status based on current marriages
+      maritalStatus: (() => {
+        const currentMarriages = (formData.marriages || []).filter(m => m.status === 'current');
+        if (currentMarriages.length > 0) return 'married';
+        const divorced = (formData.marriages || []).filter(m => m.status === 'divorced');
+        const widowed = (formData.marriages || []).filter(m => m.status === 'widowed');
+        if (widowed.length > 0) return 'widowed';
+        if (divorced.length > 0) return 'divorced';
+        return 'single';
+      })(),
+      // Keep legacy fields for backward compatibility
+      spouseName: (() => {
+        const currentMarriage = (formData.marriages || []).find(m => m.status === 'current');
+        return currentMarriage ? currentMarriage.spouseName : '';
+      })(),
+      dateOfMarriage: (() => {
+        const currentMarriage = (formData.marriages || []).find(m => m.status === 'current');
+        return currentMarriage ? currentMarriage.dateOfMarriage : '';
+      })()
+    } : {
+      marriages: formData.spouseName ? [{
+        id: Date.now(),
+        spouseName: formData.spouseName,
+        status: formData.maritalStatus === 'married' ? 'current' : formData.maritalStatus,
+        dateOfMarriage: formData.dateOfMarriage,
+        endDate: null,
+        children: formData.children || []
+      }] : [],
+      maritalStatus: formData.maritalStatus,
+      spouseName: formData.spouseName,
+      dateOfMarriage: formData.dateOfMarriage
+    };
+
     const newPerson = {
       ...formData,
+      ...processedMarriageData,
       id: Date.now(),
       children: []
     };
@@ -398,8 +447,44 @@ const FamilyTreeApp = () => {
       }
     }
 
+    // Process marriage data based on mode for editing
+    const processedEditMarriageData = showAdvancedMarriages ? {
+      marriages: formData.marriages || [],
+      // Update marital status based on current marriages
+      maritalStatus: (() => {
+        const currentMarriages = (formData.marriages || []).filter(m => m.status === 'current');
+        if (currentMarriages.length > 0) return 'married';
+        const divorced = (formData.marriages || []).filter(m => m.status === 'divorced');
+        const widowed = (formData.marriages || []).filter(m => m.status === 'widowed');
+        if (widowed.length > 0) return 'widowed';
+        if (divorced.length > 0) return 'divorced';
+        return 'single';
+      })(),
+      // Keep legacy fields for backward compatibility
+      spouseName: (() => {
+        const currentMarriage = (formData.marriages || []).find(m => m.status === 'current');
+        return currentMarriage ? currentMarriage.spouseName : '';
+      })(),
+      dateOfMarriage: (() => {
+        const currentMarriage = (formData.marriages || []).find(m => m.status === 'current');
+        return currentMarriage ? currentMarriage.dateOfMarriage : '';
+      })()
+    } : {
+      marriages: formData.spouseName ? [{
+        id: Date.now(),
+        spouseName: formData.spouseName,
+        status: formData.maritalStatus === 'married' ? 'current' : formData.maritalStatus,
+        dateOfMarriage: formData.dateOfMarriage,
+        endDate: null,
+        children: formData.children || []
+      }] : [],
+      maritalStatus: formData.maritalStatus,
+      spouseName: formData.spouseName,
+      dateOfMarriage: formData.dateOfMarriage
+    };
+
     // Validation warnings (non-blocking)
-    const updatedPerson = { ...formData, id: editingPerson.id };
+    const updatedPerson = { ...formData, ...processedEditMarriageData, id: editingPerson.id };
     const warnings = getValidationWarnings(updatedPerson, familyData.members || []);
     if (warnings.length > 0) {
       warnings.forEach(warning => showNotification(warning, 'warning', 5000));
@@ -803,6 +888,7 @@ const FamilyTreeApp = () => {
       maritalStatus: 'single',
       spouseName: '',
       dateOfMarriage: '',
+      marriages: [],
       children: [],
       birthStar: '',
       nicknames: '',
@@ -1174,9 +1260,31 @@ const FamilyTreeApp = () => {
 
   const openEditForm = (person) => {
     setEditingPerson(person);
-    setFormData(person);
+    
+    // Ensure marriages array exists for compatibility
+    let personWithMarriages = {
+      ...person,
+      marriages: person.marriages || (person.spouseName ? [{
+        id: Date.now(),
+        spouseName: person.spouseName,
+        status: person.maritalStatus === 'married' ? 'current' : person.maritalStatus,
+        dateOfMarriage: person.dateOfMarriage,
+        endDate: null,
+        children: person.children || [] // Initially assign all children to first marriage
+      }] : [])
+    };
+    
+    // If person has multiple marriages but children aren't distributed, do smart distribution
+    if (personWithMarriages.marriages.length > 1) {
+      personWithMarriages = distributeChildrenToMarriages(personWithMarriages);
+    }
+    
+    setFormData(personWithMarriages);
     setCroppedImage(person.photo); // Set cropped image to existing photo
     setShowAddForm(true);
+    
+    // Set advanced marriages mode if person has multiple marriages
+    setShowAdvancedMarriages((person.marriages && person.marriages.length > 1) || false);
     
     // Automatically enable toggles for fields that have data
     setShowOptionalFields({
@@ -1242,9 +1350,109 @@ const FamilyTreeApp = () => {
     }).filter(Boolean);
   };
 
-  const renderPersonCard = (person, index) => {
-    const childrenInfo = getChildrenInfo(person.children);
+  // Marriage helper functions
+  const getMarriages = (person) => {
+    // Return marriages array, or create from legacy data
+    if (person.marriages && person.marriages.length > 0) {
+      return person.marriages;
+    }
+    // Convert legacy single marriage data
+    if (person.maritalStatus === 'married' && person.spouseName) {
+      return [{
+        id: 1,
+        spouseName: person.spouseName,
+        dateOfMarriage: person.dateOfMarriage,
+        status: 'current', // current, divorced, widowed
+        endDate: null,
+        children: person.children || []
+      }];
+    }
+    return [];
+  };
+
+  const getCurrentSpouse = (person) => {
+    const marriages = getMarriages(person);
+    const currentMarriage = marriages.find(m => m.status === 'current');
+    return currentMarriage ? currentMarriage.spouseName : null;
+  };
+
+
+
+  const getChildrenByMarriage = (person) => {
+    const marriages = getMarriages(person);
+    return marriages.map(marriage => ({
+      marriage,
+      children: getChildrenInfo(marriage.children || [])
+    }));
+  };
+
+  const getTotalChildren = (person) => {
+    const marriages = getMarriages(person);
+    const allChildrenIds = new Set();
+    marriages.forEach(marriage => {
+      (marriage.children || []).forEach(childId => allChildrenIds.add(childId));
+    });
+    // Also include any children not assigned to marriages (legacy data)
+    (person.children || []).forEach(childId => allChildrenIds.add(childId));
+    return allChildrenIds.size;
+  };
+
+  const isMarriedOrHasBeenMarried = (person) => {
+    const marriages = getMarriages(person);
+    return marriages.length > 0 || person.maritalStatus === 'married';
+  };
+
+  // Intelligently distribute children to marriages based on birth dates
+  const distributeChildrenToMarriages = (person) => {
+    if (!person.marriages || person.marriages.length <= 1) return person;
     
+    const allChildren = (person.children || []).map(childId => {
+      const child = familyData.members.find(m => m.id === childId);
+      return child ? { id: childId, dateOfBirth: child.dateOfBirth } : null;
+    }).filter(Boolean);
+    
+    if (allChildren.length === 0) return person;
+    
+    // Sort marriages by marriage date
+    const sortedMarriages = [...person.marriages].sort((a, b) => {
+      if (!a.dateOfMarriage && !b.dateOfMarriage) return 0;
+      if (!a.dateOfMarriage) return 1;
+      if (!b.dateOfMarriage) return -1;
+      return new Date(a.dateOfMarriage) - new Date(b.dateOfMarriage);
+    });
+    
+    // Assign children to marriages based on birth dates
+    const updatedMarriages = sortedMarriages.map((marriage, index) => {
+      const marriageDate = marriage.dateOfMarriage ? new Date(marriage.dateOfMarriage) : null;
+      const nextMarriageDate = sortedMarriages[index + 1]?.dateOfMarriage ? 
+        new Date(sortedMarriages[index + 1].dateOfMarriage) : null;
+      
+      const childrenForThisMarriage = allChildren.filter(child => {
+        if (!child.dateOfBirth) return false;
+        const childBirthDate = new Date(child.dateOfBirth);
+        
+        // Child must be born after this marriage started
+        if (marriageDate && childBirthDate < marriageDate) return false;
+        
+        // Child must be born before next marriage (if exists)
+        if (nextMarriageDate && childBirthDate >= nextMarriageDate) return false;
+        
+        return true;
+      }).map(child => child.id);
+      
+      return {
+        ...marriage,
+        children: childrenForThisMarriage
+      };
+    });
+    
+    return {
+      ...person,
+      marriages: updatedMarriages
+    };
+  };
+
+  const renderPersonCard = (person, index) => {
     // IMPROVED FAMILY-BASED POSITIONING ALGORITHM
     // First, identify all parents in the previous generation who have children in this generation
     const parentsInPreviousGen = familyData.members.filter(member => 
@@ -1440,18 +1648,18 @@ const FamilyTreeApp = () => {
                     Living
                   </span>
                 )}
-                {person.maritalStatus === 'married' && (
+                {getCurrentSpouse(person) && (
                   <div className="flex items-center gap-1 text-xs text-red-700 bg-red-50/80 rounded-full px-2 py-0.5 border border-red-200 flex-1 min-w-0">
                     <Heart size={8} className="text-red-500 flex-shrink-0" />
-                    <span className="truncate font-medium">♥ {person.spouseName}</span>
+                    <span className="truncate font-medium">♥ {getCurrentSpouse(person)}</span>
                   </div>
                 )}
               </div>
-              {/* Second row: Children count */}
-              {childrenInfo.length > 0 && (
+              {/* Second row: Children count - show for married couples or when children exist */}
+              {(getTotalChildren(person) > 0 || isMarriedOrHasBeenMarried(person)) && (
                 <div className="flex items-center gap-0.5 text-[10px] text-blue-700 bg-blue-50/80 rounded-full px-1.5 py-0.5 border border-blue-200 w-fit">
                   <Users size={10} className="text-blue-600 flex-shrink-0" />
-                  <span className="font-medium whitespace-nowrap">{childrenInfo.length} {childrenInfo.length === 1 ? 'child' : 'children'}</span>
+                  <span className="font-medium whitespace-nowrap">{getTotalChildren(person)} {getTotalChildren(person) === 1 ? 'child' : 'children'}</span>
                 </div>
               )}
             </div>
@@ -2125,33 +2333,120 @@ const FamilyTreeApp = () => {
                 )}
               </div>
 
-              {selectedPerson.maritalStatus === 'married' && (
+              {getMarriages(selectedPerson).length > 0 && (
                 <div className="bg-red-50 p-4 rounded-lg border-2 border-red-300">
-                  <h4 className="text-base font-bold text-red-900 mb-2 flex items-center gap-2">
+                  <h4 className="text-base font-bold text-red-900 mb-3 flex items-center gap-2">
                     <Heart size={18} className="text-red-500" />
-                    Marriage Details
+                    Marriage{getMarriages(selectedPerson).length > 1 ? 's' : ''} ({getMarriages(selectedPerson).length})
                   </h4>
-                  <p className="text-amber-900 mb-1 text-sm"><span className="font-semibold">Spouse:</span> {selectedPerson.spouseName}</p>
-                  <p className="text-amber-900 text-sm"><span className="font-semibold">Married on:</span> {new Date(selectedPerson.dateOfMarriage).toLocaleDateString()}</p>
-                </div>
-              )}
-
-              {getChildrenInfo(selectedPerson.children).length > 0 && (
-                <div className="bg-blue-50 p-4 rounded-lg border-2 border-blue-300">
-                  <h4 className="text-base font-bold text-blue-900 mb-2 flex items-center gap-2">
-                    <Users size={18} />
-                    Children ({getChildrenInfo(selectedPerson.children).length})
-                  </h4>
-                  <div className="space-y-2">
-                    {getChildrenInfo(selectedPerson.children).map((child, idx) => (
-                      <div key={idx} className="bg-white p-2 rounded border border-blue-200">
-                        <p className="font-semibold text-blue-900 text-sm">{child.name}</p>
-                        {child.dob && (
-                          <p className="text-xs text-blue-700">Born: {new Date(child.dob).toLocaleDateString()}</p>
+                  <div className="space-y-3">
+                    {getMarriages(selectedPerson).map((marriage, idx) => (
+                      <div key={marriage.id || idx} className="bg-white p-3 rounded border border-red-200">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="font-semibold text-red-900 text-sm">
+                            {getMarriages(selectedPerson).length > 1 && `${idx + 1}. `}
+                            {marriage.spouseName}
+                          </p>
+                          <span className={`px-2 py-1 text-xs rounded-full font-medium ${
+                            marriage.status === 'current' ? 'bg-green-100 text-green-800' :
+                            marriage.status === 'divorced' ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-gray-100 text-gray-800'
+                          }`}>
+                            {marriage.status === 'current' ? 'Current' : 
+                             marriage.status === 'divorced' ? 'Divorced' : 'Widowed'}
+                          </span>
+                        </div>
+                        {marriage.dateOfMarriage && (
+                          <p className="text-xs text-red-700 mb-1">
+                            Married: {new Date(marriage.dateOfMarriage).toLocaleDateString()}
+                          </p>
+                        )}
+                        {marriage.endDate && (
+                          <p className="text-xs text-red-700 mb-1">
+                            {marriage.status === 'divorced' ? 'Divorced' : 'Widowed'}: {new Date(marriage.endDate).toLocaleDateString()}
+                          </p>
+                        )}
+                        {marriage.children && marriage.children.length > 0 && (
+                          <p className="text-xs text-blue-700">
+                            Children together: {marriage.children.length}
+                          </p>
                         )}
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {(getTotalChildren(selectedPerson) > 0 || isMarriedOrHasBeenMarried(selectedPerson)) && (
+                <div className="bg-blue-50 p-4 rounded-lg border-2 border-blue-300">
+                  <h4 className="text-base font-bold text-blue-900 mb-3 flex items-center gap-2">
+                    <Users size={18} />
+                    Children ({getTotalChildren(selectedPerson)})
+                  </h4>
+                  {getTotalChildren(selectedPerson) > 0 ? (
+                    <div className="space-y-3">
+                      {getChildrenByMarriage(selectedPerson).map((marriageGroup, idx) => (
+                        <div key={idx} className="bg-white p-3 rounded border border-blue-200">
+                          {getMarriages(selectedPerson).length > 1 && (
+                            <p className="font-semibold text-blue-800 text-sm mb-2">
+                              With {marriageGroup.marriage.spouseName}:
+                            </p>
+                          )}
+                          {marriageGroup.children.length > 0 ? (
+                            <div className="space-y-2">
+                              {marriageGroup.children.map((child, childIdx) => (
+                                <div key={childIdx} className="pl-3 border-l-2 border-blue-300">
+                                  <p className="font-medium text-blue-900 text-sm">{child.name}</p>
+                                  {child.dob && (
+                                    <p className="text-xs text-blue-700">Born: {new Date(child.dob).toLocaleDateString()}</p>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-sm text-blue-600 italic pl-3">No children together</p>
+                          )}
+                        </div>
+                      ))}
+                      
+                      {/* Show any unassigned children (legacy data) */}
+                      {(() => {
+                        const assignedChildren = new Set();
+                        getMarriages(selectedPerson).forEach(m => {
+                          (m.children || []).forEach(childId => assignedChildren.add(childId));
+                        });
+                        const unassignedChildren = (selectedPerson.children || [])
+                          .filter(childId => !assignedChildren.has(childId))
+                          .map(childId => {
+                            const child = familyData.members.find(m => m.id === childId);
+                            return child ? { name: child.fullName, dob: child.dateOfBirth } : null;
+                          }).filter(Boolean);
+                        
+                        if (unassignedChildren.length > 0) {
+                          return (
+                            <div className="bg-gray-50 p-3 rounded border border-gray-200">
+                              <p className="font-semibold text-gray-800 text-sm mb-2">Other children:</p>
+                              <div className="space-y-2">
+                                {unassignedChildren.map((child, childIdx) => (
+                                  <div key={childIdx} className="pl-3 border-l-2 border-gray-300">
+                                    <p className="font-medium text-gray-900 text-sm">{child.name}</p>
+                                    {child.dob && (
+                                      <p className="text-xs text-gray-700">Born: {new Date(child.dob).toLocaleDateString()}</p>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </div>
+                  ) : (
+                    <div className="bg-white p-3 rounded border border-blue-200">
+                      <p className="text-sm text-blue-600 italic">No children</p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -2320,57 +2615,270 @@ const FamilyTreeApp = () => {
                       </div>
                     </div>
 
-                    {formData.maritalStatus === 'married' && (
+                    {(formData.maritalStatus !== 'single') && (
                       <motion.div 
-                        className="grid grid-cols-2 gap-4"
+                        className="space-y-4"
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: 'auto' }}
                         exit={{ opacity: 0, height: 0 }}
                       >
-                        <div>
-                          <label className="block text-amber-900 font-semibold mb-2">Spouse Name *</label>
-                          <input
-                            type="text"
-                            value={formData.spouseName}
-                            onChange={(e) => updateFormData({ ...formData, spouseName: e.target.value })}
-                            className={`w-full p-4 border-2 rounded-xl focus:outline-none transition-all ${
-                              formErrors.spouseName 
-                                ? 'border-red-500 focus:border-red-600 bg-red-50' 
-                                : 'border-amber-300 focus:border-amber-600 bg-white'
-                            }`}
-                            placeholder="Enter spouse's name"
-                          />
-                          {formErrors.spouseName && (
-                            <motion.p 
-                              className="text-red-500 text-sm mt-1"
-                              initial={{ opacity: 0, y: -10 }}
-                              animate={{ opacity: 1, y: 0 }}
+                        {/* Simple Mode for single marriage */}
+                        {!showAdvancedMarriages && (
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-amber-900 font-semibold mb-2">Spouse Name *</label>
+                              <input
+                                type="text"
+                                value={formData.spouseName}
+                                onChange={(e) => updateFormData({ ...formData, spouseName: e.target.value })}
+                                className={`w-full p-4 border-2 rounded-xl focus:outline-none transition-all ${
+                                  formErrors.spouseName 
+                                    ? 'border-red-500 focus:border-red-600 bg-red-50' 
+                                    : 'border-amber-300 focus:border-amber-600 bg-white'
+                                }`}
+                                placeholder="Enter spouse's name"
+                              />
+                              {formErrors.spouseName && (
+                                <motion.p 
+                                  className="text-red-500 text-sm mt-1"
+                                  initial={{ opacity: 0, y: -10 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                >
+                                  {formErrors.spouseName}
+                                </motion.p>
+                              )}
+                            </div>
+                            <div>
+                              <label className="block text-amber-900 font-semibold mb-2">Marriage Date</label>
+                              <input
+                                type="date"
+                                value={formData.dateOfMarriage}
+                                onChange={(e) => updateFormData({ ...formData, dateOfMarriage: e.target.value })}
+                                className="w-full p-4 border-2 border-amber-300 rounded-xl focus:border-amber-600 focus:outline-none bg-white"
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Advanced Mode for multiple marriages */}
+                        {showAdvancedMarriages && (
+                          <div className="bg-red-50 p-4 rounded-xl border-2 border-red-200">
+                            <h5 className="text-red-900 font-semibold mb-3 flex items-center gap-2">
+                              <Heart size={16} className="text-red-500" />
+                              Marriage History
+                            </h5>
+                            
+                            {(formData.marriages || []).length === 0 && (
+                              <p className="text-red-700 text-sm italic mb-3">No marriages added yet. Click "Add Marriage" to start.</p>
+                            )}
+                            
+                            {(formData.marriages || []).map((marriage, index) => (
+                              <div key={marriage.id || index} className="bg-white p-4 rounded-lg border border-red-300 mb-3">
+                                <div className="flex items-center justify-between mb-3">
+                                  <h6 className="font-semibold text-red-900">Marriage {index + 1}</h6>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const updatedMarriages = formData.marriages.filter((_, i) => i !== index);
+                                      updateFormData({ ...formData, marriages: updatedMarriages });
+                                    }}
+                                    className="text-red-600 hover:text-red-800 p-1"
+                                    title="Remove this marriage"
+                                  >
+                                    <X size={16} />
+                                  </button>
+                                </div>
+                                
+                                <div className="grid grid-cols-2 gap-3 mb-3">
+                                  <div>
+                                    <label className="block text-sm font-medium text-red-800 mb-1">Spouse Name *</label>
+                                    <input
+                                      type="text"
+                                      value={marriage.spouseName || ''}
+                                      onChange={(e) => {
+                                        const updatedMarriages = [...(formData.marriages || [])];
+                                        updatedMarriages[index] = { ...marriage, spouseName: e.target.value };
+                                        updateFormData({ ...formData, marriages: updatedMarriages });
+                                      }}
+                                      className="w-full p-2 border border-red-300 rounded focus:border-red-500 focus:outline-none text-sm"
+                                      placeholder="Spouse name"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-sm font-medium text-red-800 mb-1">Status</label>
+                                    <select
+                                      value={marriage.status || 'current'}
+                                      onChange={(e) => {
+                                        const updatedMarriages = [...(formData.marriages || [])];
+                                        updatedMarriages[index] = { ...marriage, status: e.target.value };
+                                        updateFormData({ ...formData, marriages: updatedMarriages });
+                                      }}
+                                      className="w-full p-2 border border-red-300 rounded focus:border-red-500 focus:outline-none text-sm"
+                                    >
+                                      <option value="current">Current</option>
+                                      <option value="divorced">Divorced</option>
+                                      <option value="widowed">Widowed</option>
+                                    </select>
+                                  </div>
+                                </div>
+                                
+                                <div className="grid grid-cols-2 gap-3 mb-3">
+                                  <div>
+                                    <label className="block text-sm font-medium text-red-800 mb-1">Marriage Date</label>
+                                    <input
+                                      type="date"
+                                      value={marriage.dateOfMarriage || ''}
+                                      onChange={(e) => {
+                                        const updatedMarriages = [...(formData.marriages || [])];
+                                        updatedMarriages[index] = { ...marriage, dateOfMarriage: e.target.value };
+                                        updateFormData({ ...formData, marriages: updatedMarriages });
+                                      }}
+                                      className="w-full p-2 border border-red-300 rounded focus:border-red-500 focus:outline-none text-sm"
+                                    />
+                                  </div>
+                                  {marriage.status !== 'current' && (
+                                    <div>
+                                      <label className="block text-sm font-medium text-red-800 mb-1">
+                                        {marriage.status === 'divorced' ? 'Divorce Date' : 'Death Date'}
+                                      </label>
+                                      <input
+                                        type="date"
+                                        value={marriage.endDate || ''}
+                                        onChange={(e) => {
+                                          const updatedMarriages = [...(formData.marriages || [])];
+                                          updatedMarriages[index] = { ...marriage, endDate: e.target.value };
+                                          updateFormData({ ...formData, marriages: updatedMarriages });
+                                        }}
+                                        className="w-full p-2 border border-red-300 rounded focus:border-red-500 focus:outline-none text-sm"
+                                      />
+                                    </div>
+                                  )}
+                                </div>
+                                
+                                {/* Children Assignment Section */}
+                                <div className="border-t border-red-200 pt-3">
+                                  <label className="block text-sm font-medium text-red-800 mb-2">
+                                    Children from this marriage ({(marriage.children || []).length})
+                                  </label>
+                                  {(() => {
+                                    // Get all children of this person
+                                    const allChildren = familyData.members.filter(member => 
+                                      member.parentId === (editingPerson ? editingPerson.id : null) ||
+                                      (formData.children || []).includes(member.id)
+                                    );
+                                    
+                                    if (allChildren.length === 0) {
+                                      return (
+                                        <p className="text-xs text-gray-600 italic">No children to assign</p>
+                                      );
+                                    }
+                                    
+                                    return (
+                                      <div className="space-y-2 max-h-32 overflow-y-auto">
+                                        {allChildren.map(child => {
+                                          const isAssigned = (marriage.children || []).includes(child.id);
+                                          return (
+                                            <div key={child.id} className="flex items-center gap-2">
+                                              <input
+                                                type="checkbox"
+                                                checked={isAssigned}
+                                                onChange={(e) => {
+                                                  const updatedMarriages = [...(formData.marriages || [])];
+                                                  const currentChildren = marriage.children || [];
+                                                  
+                                                  if (e.target.checked) {
+                                                    // Add child to this marriage
+                                                    updatedMarriages[index] = { 
+                                                      ...marriage, 
+                                                      children: [...currentChildren, child.id] 
+                                                    };
+                                                    
+                                                    // Remove child from other marriages
+                                                    updatedMarriages.forEach((otherMarriage, otherIndex) => {
+                                                      if (otherIndex !== index && otherMarriage.children) {
+                                                        otherMarriage.children = otherMarriage.children.filter(childId => childId !== child.id);
+                                                      }
+                                                    });
+                                                  } else {
+                                                    // Remove child from this marriage
+                                                    updatedMarriages[index] = { 
+                                                      ...marriage, 
+                                                      children: currentChildren.filter(childId => childId !== child.id)
+                                                    };
+                                                  }
+                                                  
+                                                  updateFormData({ ...formData, marriages: updatedMarriages });
+                                                }}
+                                                className="w-4 h-4 text-red-600 rounded focus:ring-red-500"
+                                              />
+                                              <label className="text-sm text-gray-700 flex-1">
+                                                {child.fullName}
+                                                {child.dateOfBirth && (
+                                                  <span className="text-xs text-gray-500 ml-1">
+                                                    (Born: {new Date(child.dateOfBirth).toLocaleDateString()})
+                                                  </span>
+                                                )}
+                                              </label>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    );
+                                  })()}
+                                </div>
+                              </div>
+                            ))}
+                            
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const newMarriage = {
+                                  id: Date.now(),
+                                  spouseName: '',
+                                  status: 'current',
+                                  dateOfMarriage: '',
+                                  endDate: null,
+                                  children: []
+                                };
+                                updateFormData({ 
+                                  ...formData, 
+                                  marriages: [...(formData.marriages || []), newMarriage] 
+                                });
+                              }}
+                              className="w-full p-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
                             >
-                              {formErrors.spouseName}
-                            </motion.p>
-                          )}
-                        </div>
-                        <div>
-                          <label className="block text-amber-900 font-semibold mb-2">Marriage Date *</label>
-                          <input
-                            type="date"
-                            value={formData.dateOfMarriage}
-                            onChange={(e) => updateFormData({ ...formData, dateOfMarriage: e.target.value })}
-                            className={`w-full p-4 border-2 rounded-xl focus:outline-none transition-all ${
-                              formErrors.dateOfMarriage 
-                                ? 'border-red-500 focus:border-red-600 bg-red-50' 
-                                : 'border-amber-300 focus:border-amber-600 bg-white'
-                            }`}
-                          />
-                          {formErrors.dateOfMarriage && (
-                            <motion.p 
-                              className="text-red-500 text-sm mt-1"
-                              initial={{ opacity: 0, y: -10 }}
-                              animate={{ opacity: 1, y: 0 }}
-                            >
-                              {formErrors.dateOfMarriage}
-                            </motion.p>
-                          )}
+                              <Plus size={16} />
+                              Add Marriage
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Toggle between simple and advanced mode */}
+                        <div className="text-center">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowAdvancedMarriages(!showAdvancedMarriages);
+                              // Convert simple marriage to advanced format when switching
+                              if (!showAdvancedMarriages && formData.spouseName) {
+                                const existingMarriage = {
+                                  id: Date.now(),
+                                  spouseName: formData.spouseName,
+                                  status: formData.maritalStatus === 'married' ? 'current' : formData.maritalStatus,
+                                  dateOfMarriage: formData.dateOfMarriage,
+                                  endDate: null,
+                                  children: formData.children || []
+                                };
+                                updateFormData({ 
+                                  ...formData, 
+                                  marriages: [existingMarriage] 
+                                });
+                              }
+                            }}
+                            className="text-red-600 text-sm hover:text-red-800 underline"
+                          >
+                            {showAdvancedMarriages ? 'Switch to Simple Mode' : 'Add Multiple Marriages'}
+                          </button>
                         </div>
                       </motion.div>
                     )}

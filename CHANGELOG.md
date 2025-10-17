@@ -2,6 +2,42 @@
 
 All notable changes to the Family Tree Application.
 
+## [1.5.0] - 2025-10-17 - Advanced Marriage & Children Management
+
+### Added
+- **Multiple Marriage Support**: Complete redesign of marriage system
+  - Support for divorced, widowed, and remarried individuals
+  - Advanced marriage form with multiple marriage entries
+  - Smart toggle between simple and advanced marriage modes
+  - Marriage status tracking (Current, Divorced, Widowed)
+  - Marriage and end date management
+
+- **Enhanced Children Management**: Children-to-marriage assignment system
+  - Individual child assignment to specific marriages
+  - Intelligent auto-distribution based on birth dates and marriage periods
+  - Visual child assignment interface with checkboxes per marriage
+  - Real-time child count updates per marriage
+  - Support for children from different relationships
+
+- **Improved Person Display**: Enhanced visualization for complex families
+  - Marriage history display with status badges
+  - Children organized by marriage relationship
+  - "0 children" display for married couples without children
+  - Color-coded marriage status indicators
+  - Support for multiple spouse relationships
+
+### Enhanced
+- **Person Cards**: Now show current spouse and total children count
+- **Detailed Person View**: Complete marriage history with dates and children breakdown
+- **Form Validation**: Context-aware validation for multiple marriages
+- **Data Migration**: Automatic conversion of legacy single-marriage data
+
+### Technical Improvements
+- **Smart Data Distribution**: Algorithms for child-to-marriage assignment
+- **Backward Compatibility**: Seamless handling of existing family data
+- **Enhanced Helper Functions**: Marriage management utilities
+- **Real-time Updates**: Dynamic form interactions and count updates
+
 ## [1.4.0] - 2025-10-16 - High Priority Improvements
 
 ### Added
