@@ -2,6 +2,124 @@
 
 All notable changes to the Family Tree Application.
 
+## [1.5.0] - 2025-10-17 - Multiple Marriage System & UI Reorganization
+
+### Added
+- **Multiple Marriage Support**: Complete multiple marriage tracking system
+  - Support for divorced, widowed, and remarried scenarios
+  - Advanced marriage toggle for complex relationship management
+  - Marriage status tracking (current, divorced, widowed)
+  - Child-to-marriage assignment with intelligent distribution
+  - Automatic migration from simple spouse format to marriage array
+  - Shows "0 children" for married couples without children
+
+- **Enhanced UI Control System**: Reorganized interface for better accessibility
+  - Moved all action buttons to bottom-right floating control panel
+  - Clean header navigation with only family name display
+  - Organized floating controls: Add, Undo, Redo, Home, Exit/Logout
+  - Improved mobile accessibility with touch-friendly controls
+  - Fixed duplicate button issues and streamlined control layout
+
+- **Advanced Form Management**: Enhanced person editing capabilities
+  - Multi-marriage form interface for complex relationships
+  - Child assignment UI for linking children to specific marriages
+  - Automatic form field enabling based on existing data
+  - Smart validation for marriage data consistency
+
+### Enhanced
+- **Family Tree Display**: Improved visual representation
+  - Marriage information displayed on person cards
+  - Child-to-marriage mapping with clear visual indicators
+  - Enhanced person cards with marriage status and spouse details
+  - Responsive design optimized for mobile, tablet, and desktop
+
+- **Data Structure Evolution**: Advanced relationship modeling
+  ```javascript
+  // Before: Simple spouse string
+  spouse: "John Doe"
+  
+  // After: Complex marriage array
+  marriages: [
+    {
+      spouseName: "John Doe",
+      status: "current",
+      marriageDate: "2020-01-15", 
+      children: ["child-id-1", "child-id-2"]
+    }
+  ]
+  ```
+
+### Fixed
+- Duplicate home/reset button in bottom-right controls
+- Header navigation button overcrowding on mobile devices
+- Control button organization and accessibility issues
+- Marriage data consistency during form submissions
+
+### Technical
+- Added `showAdvancedMarriages` state for complex relationship toggle
+- Implemented marriage array structure with backward compatibility
+- Enhanced form validation for multi-marriage scenarios
+- Improved mobile responsive design patterns
+- Streamlined floating control architecture
+
+## [1.4.0] - 2025-10-16 - High Priority Improvements
+
+### Added
+- **Undo/Redo Functionality**: Complete undo/redo system with 10-action history
+  - Undo button with visual feedback and tooltips
+  - Redo button with state management
+  - Saves state before every add/edit/delete operation
+  - Keyboard shortcuts support (Cmd/Ctrl+Z for undo, Cmd/Ctrl+Y for redo)
+  - Disabled state when no actions available
+  
+- **Recursive Generation Recalculation**: Automatic generation number updates
+  - Recalculates entire family tree after relationship changes
+  - Works with deep hierarchies (5+ generations)
+  - Handles multiple independent root trees
+  - Triggered after all add/edit/delete operations
+  
+- **Circular Relationship Prevention**: Prevents impossible family structures
+  - Detects if setting parent would create circular reference
+  - Blocks person from being their own ancestor
+  - Shows clear error messages
+  - Graph traversal with cycle detection algorithm
+  
+- **Validation Warnings**: Non-blocking data quality checks
+  - Age validation (parent too young when child born)
+  - Death date before birth date warnings
+  - Child born before parent warnings
+  - Duplicate name detection
+  - Generation inconsistency alerts
+  - Warnings don't block save operations
+  
+- **Error Handling with Rollback**: Automatic recovery from failures
+  - Database save wrapped in try-catch blocks
+  - Automatic UI rollback on save failure
+  - Clear error notifications
+  - Previous state restored seamlessly
+
+### Changed
+- Wrapped `saveToDatabase` in useCallback for performance
+- Wrapped `showNotification` in useCallback for consistency
+- All handler functions now include comprehensive error handling
+- History saved before every mutation operation
+
+### Technical
+- Added `history`, `historyIndex`, `isUndoing` state variables
+- Implemented `recalculateGenerations()` recursive function
+- Implemented `recalculateAllGenerations()` for multi-root trees
+- Implemented `detectCircularRelationship()` with visited set optimization
+- Implemented `getValidationWarnings()` for data quality checks
+- Implemented `saveToHistory()` for history management
+- Implemented `handleUndo()` and `handleRedo()` functions
+- Added undo/redo buttons to admin toolbar
+- Enhanced all handlers with validation and error handling
+
+### Performance
+- Build size: 146.35 kB gzipped (+1.15 kB from v1.3.2)
+- History limited to 10 entries (~500KB max memory)
+- All algorithms optimized with O(n) complexity
+
 ## [1.3.2] - 2025-10-15
 
 ### Added
