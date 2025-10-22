@@ -1,41 +1,48 @@
 import { supabase } from '../supabaseClient';
-
-// Public tree ID - everyone sees the same tree
-const PUBLIC_TREE_ID = 'public_main_tree';
+import { getSubdomain } from '../utils/subdomain';
 
 export const familyTreeService = {
-  // Check if any admin exists in the system
-  async checkAdminExists() {
+  // Get current family context from subdomain
+  getCurrentFamilyId() {
+    // Store in sessionStorage for performance
+    return sessionStorage.getItem('currentFamilyId');
+  },
+
+  // Get family info by subdomain
+  async getFamilyBySubdomain(subdomain) {
     try {
-      const { data, error } = await supabase
-        .from('admin_users')
-        .select('id')
-        .eq('is_active', true)
-        .limit(1);
-      
+      const { data, error } = await supabase.rpc('get_family_by_subdomain', {
+        lookup_subdomain: subdomain
+      });
+
       if (error) {
-        console.error('Error checking admin existence:', error);
-        return { success: false, adminExists: false, error: error.message };
+        console.error('Error fetching family:', error);
+        return { success: false, error: error.message };
       }
-      
-      return { 
-        success: true, 
-        adminExists: data && data.length > 0 
-      };
+
+      if (data && data.success) {
+        // Cache the family ID
+        sessionStorage.setItem('currentFamilyId', data.family.id);
+        sessionStorage.setItem('currentFamilyData', JSON.stringify(data.family));
+        return { success: true, family: data.family };
+      }
+
+      return { success: false, error: data?.message || 'Family not found' };
     } catch (error) {
-      console.error('Error in checkAdminExists:', error);
-      return { success: false, adminExists: false, error: error.message };
+      console.error('Error in getFamilyBySubdomain:', error);
+      return { success: false, error: error.message };
     }
   },
 
-  // Create initial admin (only works if no admin exists)
-  async createInitialAdmin({ username, password, email, familyName }) {
+  // Create initial admin and family (multi-tenant)
+  async createInitialAdmin({ username, password, email, familyName, displayName }) {
     try {
       const { data, error } = await supabase.rpc('create_initial_admin', {
         admin_username: username,
         admin_password: password,
         admin_email: email,
-        family_surname: familyName
+        family_surname: familyName,
+        display_name: displayName || familyName // Use displayName if provided, otherwise familyName
       });
 
       if (error) {
@@ -47,27 +54,42 @@ export const familyTreeService = {
         return { success: false, message: data.message };
       }
 
-      return { success: true, message: 'Admin created successfully!' };
+      // Return the full data including subdomain and URL
+      return { 
+        success: true, 
+        message: 'Family created successfully!',
+        subdomain: data.subdomain,
+        url: data.url,
+        familyId: data.family_id
+      };
     } catch (error) {
       console.error('Error in createInitialAdmin:', error);
       return { success: false, message: 'Network error occurred' };
     }
   },
-  // Save family tree data to database (admin only)
+  // Save family tree data to database (admin only, family-specific)
   saveFamilyTree: async (familyData) => {
     try {
-      const payload = {
-        tree_id: PUBLIC_TREE_ID,
-        surname: familyData.surname,
-        members: familyData.members,
-        is_public: true
-      };
-      
+      const subdomain = getSubdomain();
+      if (!subdomain) {
+        return { success: false, error: 'No family context found' };
+      }
+
+      // Get family info first
+      const familyResult = await familyTreeService.getFamilyBySubdomain(subdomain);
+      if (!familyResult.success) {
+        return { success: false, error: 'Family not found' };
+      }
+
+      const familyId = familyResult.family.id;
+
       const { data, error } = await supabase
         .from('family_trees')
-        .upsert(payload, {
-          onConflict: 'tree_id'
-        });
+        .update({ 
+          members: familyData.members,
+          updated_at: new Date().toISOString()
+        })
+        .eq('family_id', familyId);
 
       if (error) {
         console.error('💥 Supabase error:', error);
@@ -81,14 +103,33 @@ export const familyTreeService = {
     }
   },
 
-  // Load family tree data from database (public access)
+  // Load family tree data from database (family-specific)
   loadFamilyTree: async () => {
     try {
+      const subdomain = getSubdomain();
+      if (!subdomain) {
+        // Root domain - no tree to load
+        return { 
+          success: false, 
+          error: 'No family selected',
+          isRoot: true 
+        };
+      }
+
+      // Get family info
+      const familyResult = await familyTreeService.getFamilyBySubdomain(subdomain);
+      if (!familyResult.success) {
+        return { success: false, error: 'Family not found' };
+      }
+
+      const familyId = familyResult.family.id;
+      const familySurname = familyResult.family.displayName || familyResult.family.surname || 'Family';
+
+      // Load the family tree
       const { data, error } = await supabase
         .from('family_trees')
         .select('*')
-        .eq('tree_id', PUBLIC_TREE_ID)
-        .eq('is_public', true)
+        .eq('family_id', familyId)
         .single();
 
       if (error) {
@@ -97,7 +138,7 @@ export const familyTreeService = {
           return { 
             success: true, 
             data: {
-              surname: 'My Family',
+              surname: familySurname,
               members: []
             }
           };
@@ -108,7 +149,7 @@ export const familyTreeService = {
       return { 
         success: true, 
         data: {
-          surname: data.surname,
+          surname: familySurname,
           members: data.members || []
         }
       };
@@ -118,21 +159,33 @@ export const familyTreeService = {
     }
   },
 
-  // Admin login verification
+  // Admin login verification (family-specific)
   verifyAdminLogin: async (username, password) => {
     try {
+      const subdomain = getSubdomain();
+      if (!subdomain) {
+        return { success: false, error: 'Not on a family subdomain' };
+      }
+
       const { data, error } = await supabase
         .rpc('verify_admin_login', {
-          input_username: username,
-          input_password: password
+          login_subdomain: subdomain,
+          login_username: username,
+          login_password: password
         });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Login error:', error);
+        return { success: false, error: error.message };
+      }
       
-      if (data) {
-        return { success: true, isAdmin: true };
+      if (data && data.success) {
+        // Store user info in session
+        sessionStorage.setItem('adminUser', JSON.stringify(data.user));
+        sessionStorage.setItem('currentFamilyId', data.family.id);
+        return { success: true, isAdmin: true, user: data.user, family: data.family };
       } else {
-        return { success: false, error: 'Invalid credentials' };
+        return { success: false, error: data?.message || 'Invalid credentials' };
       }
     } catch (error) {
       console.error('❌ Error verifying admin login:', error);
@@ -140,33 +193,9 @@ export const familyTreeService = {
     }
   },
 
-  // Get current tree ID (always public)
-  getCurrentTreeId: () => {
-    return PUBLIC_TREE_ID;
-  },
-
-  // Share tree - get shareable link (same for everyone)
+  // Get shareable link for current family
   getShareableLink: () => {
     return window.location.origin;
-  },
-
-  // Create initial admin user
-  createAdminUser: async (username, password) => {
-    try {
-      const { data, error } = await supabase
-        .from('admin_users')
-        .insert({
-          username: username,
-          password_hash: password // Note: In production, hash this properly
-        });
-
-      if (error) throw error;
-      
-      return { success: true, data };
-    } catch (error) {
-      console.error('❌ Error creating admin user:', error);
-      return { success: false, error: error.message };
-    }
   },
 
 
@@ -187,6 +216,26 @@ export const familyTreeService = {
       return { success: true, data };
     } catch (error) {
       console.error('❌ Database connection test failed:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // Update family theme (admin only)
+  async updateFamilyTheme(familyId, theme) {
+    try {
+      const { data, error } = await supabase.rpc('update_family_theme', {
+        p_family_id: familyId,
+        p_theme: theme
+      });
+
+      if (error) {
+        console.error('Error updating theme:', error);
+        return { success: false, error: error.message };
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Error in updateFamilyTheme:', error);
       return { success: false, error: error.message };
     }
   }
