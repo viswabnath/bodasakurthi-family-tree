@@ -3729,7 +3729,7 @@ const FamilyTreeApp = () => {
                     Profile Photo
                   </h4>
                   <div className="flex items-center gap-6">
-                    <div className={`relative w-24 h-24 bg-gray-200 rounded-full overflow-hidden border-4 ${theme.cardBorder} shadow-lg shrink-0`}>
+                    <div className={`relative w-24 h-24 rounded-full overflow-hidden border-4 ${theme.cardBorder} shadow-lg shrink-0 bg-white/10`}>
                       {croppedImage || formData.photo ? (
                         <img 
                           src={croppedImage || formData.photo} 
@@ -3738,8 +3738,8 @@ const FamilyTreeApp = () => {
                           style={{ objectPosition: 'center' }}
                         />
                       ) : (
-                        <div className="absolute inset-0 w-full h-full bg-gradient-to-br from-gray-300 to-gray-400 flex items-center justify-center">
-                          <Camera size={32} className="text-gray-600" />
+                        <div className="absolute inset-0 w-full h-full bg-gradient-to-br from-purple-300/40 to-purple-500/40 flex items-center justify-center backdrop-blur-sm">
+                          <Camera size={32} className="text-purple-700" />
                         </div>
                       )}
                     </div>
@@ -3747,7 +3747,7 @@ const FamilyTreeApp = () => {
                       <div className="flex gap-3">
                         <label className="cursor-pointer inline-block">
                           <motion.div 
-                            className={`px-4 sm:px-6 py-2 sm:py-3 ${theme.primary} text-white rounded-xl ${theme.primaryHover} transition-all flex items-center gap-2 shadow-lg`}
+                            className="px-4 sm:px-6 py-2 sm:py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all flex items-center gap-2 shadow-lg font-semibold"
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}
                           >
