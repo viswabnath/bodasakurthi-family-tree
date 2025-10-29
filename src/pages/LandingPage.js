@@ -1,10 +1,40 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Users, Heart, Lock, Sparkles, ArrowRight } from 'lucide-react';
+import { Users, Heart, Lock, Sparkles, ArrowRight, Search, LogIn } from 'lucide-react';
 
-const LandingPage = () => {
+const LandingPage = ({ onAdminLoginClick }) => {
+  const [searchInput, setSearchInput] = useState('');
+  const [searchError, setSearchError] = useState('');
+
   const handleGetStarted = () => {
     window.location.href = '/register';
+  };
+
+  const handleAdminLoginClick = () => {
+    if (onAdminLoginClick) {
+      onAdminLoginClick();
+    }
+  };
+
+  const handleSearchSubmit = (e) => {
+    e.preventDefault();
+    setSearchError('');
+    
+    if (!searchInput.trim()) {
+      setSearchError('Please enter a family name');
+      return;
+    }
+
+    // Sanitize input
+    const sanitized = searchInput.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+    
+    if (sanitized.length < 2) {
+      setSearchError('Family name must be at least 2 characters');
+      return;
+    }
+
+    // Navigate to the family subdomain
+    window.location.href = `https://${sanitized}.familywall.in`;
   };
 
   return (
@@ -36,7 +66,7 @@ const LandingPage = () => {
 
         {/* Header */}
         <header className="relative z-10 container mx-auto px-4 py-6">
-          <nav className="flex justify-between items-center">
+          <nav className="flex justify-between items-center gap-4">
             <motion.div 
               className="flex items-center gap-2"
               initial={{ opacity: 0, x: -20 }}
@@ -48,16 +78,39 @@ const LandingPage = () => {
               <span className="text-2xl font-bold text-amber-900">FamilyWall</span>
             </motion.div>
             
-            <motion.button
-              onClick={handleGetStarted}
-              className="px-6 py-2 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-lg font-semibold hover:from-amber-700 hover:to-orange-700 transition-all shadow-lg"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-            >
-              Get Started
-            </motion.button>
+            <div className="flex items-center gap-3 ml-auto">
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                <button
+                  onClick={handleAdminLoginClick}
+                  type="button"
+                  className="px-4 py-2 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-lg font-semibold transition-all shadow-lg flex items-center gap-2 cursor-pointer"
+                >
+                  <LogIn size={18} />
+                  <span className="hidden sm:inline text-sm">Admin Login</span>
+                </button>
+              </motion.div>
+              
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                <button
+                  onClick={handleGetStarted}
+                  type="button"
+                  className="px-6 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-bold shadow-lg transition-all cursor-pointer"
+                >
+                  <span className="hidden sm:inline">Get Started</span>
+                  <span className="sm:hidden text-sm">Register</span>
+                </button>
+              </motion.div>
+            </div>
           </nav>
         </header>
 
@@ -107,6 +160,85 @@ const LandingPage = () => {
                 Get your custom URL: <code className="text-orange-600">yourfamily.familywall.in</code>
               </span>
             </motion.div>
+          </div>
+        </div>
+      </div>
+
+      {/* Search & Access Section */}
+      <div className="bg-gradient-to-r from-amber-100 to-orange-100 py-16">
+        <div className="container mx-auto px-4">
+          <div className="max-w-3xl mx-auto">
+            <h2 className="text-3xl font-bold text-amber-900 text-center mb-10">
+              Find or Manage Your Family Tree
+            </h2>
+            
+            <div className="grid md:grid-cols-2 gap-8">
+              {/* Search for existing family */}
+              <motion.div
+                className="bg-white rounded-2xl p-8 shadow-lg"
+                initial={{ opacity: 0, x: -20 }}
+                whileInView={{ opacity: 1, x: 0 }}
+                viewport={{ once: true }}
+              >
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 bg-blue-500 rounded-lg flex items-center justify-center">
+                    <Search className="w-6 h-6 text-white" />
+                  </div>
+                  <h3 className="text-xl font-bold text-amber-900">Search Family Tree</h3>
+                </div>
+                <p className="text-amber-700 mb-4">
+                  Looking for a family tree? Search by surname to find and view publicly shared family trees.
+                </p>
+                <form onSubmit={handleSearchSubmit} className="space-y-3">
+                  <input
+                    type="text"
+                    value={searchInput}
+                    onChange={(e) => {
+                      setSearchInput(e.target.value);
+                      setSearchError('');
+                    }}
+                    placeholder="Enter family surname (e.g., Smith)"
+                    className="w-full px-4 py-3 border-2 border-amber-200 rounded-lg focus:border-amber-500 focus:ring-2 focus:ring-amber-300 focus:outline-none"
+                  />
+                  {searchError && (
+                    <p className="text-red-600 text-sm">{searchError}</p>
+                  )}
+                  <button
+                    type="submit"
+                    className="w-full px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-semibold transition-all flex items-center justify-center gap-2"
+                  >
+                    <Search size={20} />
+                    Search
+                  </button>
+                </form>
+              </motion.div>
+
+              {/* Admin Login */}
+              <motion.div
+                className="bg-white rounded-2xl p-8 shadow-lg"
+                initial={{ opacity: 0, x: 20 }}
+                whileInView={{ opacity: 1, x: 0 }}
+                viewport={{ once: true }}
+              >
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 bg-green-500 rounded-lg flex items-center justify-center">
+                    <LogIn className="w-6 h-6 text-white" />
+                  </div>
+                  <h3 className="text-xl font-bold text-amber-900">Admin Login</h3>
+                </div>
+                <p className="text-amber-700 mb-4">
+                  Already have a family tree? Click to login with your credentials and manage your tree.
+                </p>
+                <button
+                  onClick={handleAdminLoginClick}
+                  type="button"
+                  className="w-full px-6 py-3 bg-green-500 hover:bg-green-600 text-white rounded-lg font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <LogIn size={20} />
+                  Admin Login
+                </button>
+              </motion.div>
+            </div>
           </div>
         </div>
       </div>

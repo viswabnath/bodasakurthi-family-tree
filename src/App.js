@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { X, Plus, Edit2, Users, Home, Upload, Heart, Star, LogOut, Save, Check, Lock, User, Camera, AlertCircle, LogIn, Sparkles, Palette } from 'lucide-react';
+import { X, Plus, Edit2, Users, Home, Upload, Heart, Star, LogOut, Save, Check, Lock, User, Camera, AlertCircle, LogIn, Sparkles, Palette, Menu } from 'lucide-react';
 import { Switch } from '@headlessui/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactCrop from 'react-image-crop';
@@ -21,6 +21,7 @@ const FamilyTreeApp = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchError, setSearchError] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [familyData, setFamilyData] = useState({
     surname: '',
     members: []
@@ -249,7 +250,7 @@ const FamilyTreeApp = () => {
       
       // Check for existing admin session
       const checkAdminSession = () => {
-        const sessionData = sessionStorage.getItem('adminSession');
+        const sessionData = localStorage.getItem('adminSession');
         if (sessionData) {
           try {
             const { isAdmin, timestamp, subdomain: sessionSubdomain } = JSON.parse(sessionData);
@@ -264,10 +265,10 @@ const FamilyTreeApp = () => {
               return true;
             } else {
               // Clear expired or invalid session
-              sessionStorage.removeItem('adminSession');
+              localStorage.removeItem('adminSession');
             }
           } catch (e) {
-            sessionStorage.removeItem('adminSession');
+            localStorage.removeItem('adminSession');
           }
         }
         return false;
@@ -289,26 +290,13 @@ const FamilyTreeApp = () => {
         }
       }
       
-      // Check admin session first
-      const hasValidSession = checkAdminSession();
+      // Check admin session first (and set isAdmin state if valid)
+      checkAdminSession();
       
       // Subdomain with /register path - redirect to root
       if (!isRoot && currentPath === '/register') {
         window.location.replace('/');
         return;
-      }
-      
-      // Subdomain with /admin path - show admin login (unless already logged in)
-      if (!isRoot && currentPath === '/admin') {
-        if (!hasValidSession) {
-          setShowAdminLogin(true);
-          setCheckingSetup(false);
-          document.title = 'Admin Login - FamilyWall';
-          return;
-        } else {
-          // Already logged in, redirect to root
-          window.history.pushState({}, '', '/');
-        }
       }
       
       // Subdomain - load family tree for this subdomain
@@ -363,6 +351,77 @@ const FamilyTreeApp = () => {
       document.title = `${familyData.surname} Family Tree`;
     }
   }, [familyData.surname]);
+
+  // Handle pending admin login after redirect from homepage
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const processPendingLogin = async () => {
+      // Check URL query parameters for auth credentials (passed from homepage login)
+      const urlParams = new URLSearchParams(window.location.search);
+      const authParam = urlParams.get('auth');
+      
+      if (!authParam) {
+        return;
+      }
+      
+      const isRoot = isRootDomain();
+      if (isRoot) {
+        return;
+      }
+      
+      try {
+        // Decode the credentials from URL parameter
+        const decodedAuth = JSON.parse(atob(decodeURIComponent(authParam)));
+        const { username, password, timestamp } = decodedAuth;
+        
+        // Check if pending login is fresh (less than 2 minutes old)
+        const age = Date.now() - timestamp;
+        
+        if (age > 2 * 60 * 1000) {
+          window.history.replaceState({}, document.title, window.location.pathname);
+          return;
+        }
+        
+        // Wait for initialization to complete
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Process the login
+        const result = await familyTreeService.verifyAdminLogin(username, password);
+        
+        if (result.success) {
+          setIsAdmin(true);
+          setShowAdminLogin(false);
+          setLoginError('');
+          
+          // Store admin session for future visits
+          const subdomain = getSubdomain();
+          const sessionData = {
+            isAdmin: true,
+            timestamp: Date.now(),
+            subdomain: subdomain
+          };
+          localStorage.setItem('adminSession', JSON.stringify(sessionData));
+          
+          // Clean up URL (remove auth parameter from history)
+          window.history.replaceState({}, document.title, window.location.pathname);
+          
+          showNotification('✅ Successfully logged in as admin', 'success');
+        } else {
+          console.error('❌ ADMIN LOGIN FAILED:', result.error);
+          setLoginError(result.error || 'Login failed');
+          setShowAdminLogin(true);
+          window.history.replaceState({}, document.title, window.location.pathname);
+          showNotification(`❌ ${result.error || 'Login failed'}`, 'error');
+        }
+      } catch (error) {
+        console.error('❌ Error processing pending login:', error);
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    };
+    
+    processPendingLogin();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Data integrity repair function
   const repairFamilyDataIntegrity = useCallback(() => {
@@ -571,7 +630,7 @@ const FamilyTreeApp = () => {
 
   const handleAddPerson = async () => {
     if (!validateForm()) {
-      showNotification('Please fix the validation errors before submitting', 'warning');
+      showNotification('Please fix the validation errors before submitting', 'warning', 4000);
       return;
     }
     
@@ -702,12 +761,12 @@ const FamilyTreeApp = () => {
           4000
         );
       } else if (selectedChildrenToLink.length > 0) {
-        showNotification(`✅ ${newPerson.fullName} added with ${selectedChildrenToLink.length} child${selectedChildrenToLink.length > 1 ? 'ren' : ''}`, 'success');
+        showNotification(`✅ ${newPerson.fullName} added with ${selectedChildrenToLink.length} child${selectedChildrenToLink.length > 1 ? 'ren' : ''}`, 'success', 4000);
       } else {
-        showNotification(`✅ ${newPerson.fullName} added to family tree`, 'success');
+        showNotification(`✅ ${newPerson.fullName} added to family tree`, 'success', 4000);
       }
     } else {
-      showNotification(`✅ ${newPerson.fullName} added to family tree`, 'success');
+      showNotification(`✅ ${newPerson.fullName} added to family tree`, 'success', 4000);
     }
 
     let updatedData = {
@@ -724,6 +783,20 @@ const FamilyTreeApp = () => {
     saveToHistory(familyData, `Added ${newPerson.fullName}`);
 
     setFamilyData(updatedData);
+    
+    // Refresh selectedPerson if they're the parent or a linked child
+    if (selectedPerson) {
+      if (selectedPerson.id === formData.parentId) {
+        // Parent's view - update to show new child
+        const updatedParent = updatedData.members.find(m => m.id === selectedPerson.id);
+        if (updatedParent) setSelectedPerson(updatedParent);
+      } else if (selectedChildrenToLink.includes(selectedPerson.id)) {
+        // Linked child's view - update to show new parent
+        const updatedChild = updatedData.members.find(m => m.id === selectedPerson.id);
+        if (updatedChild) setSelectedPerson(updatedChild);
+      }
+    }
+    
     setShowAddForm(false);
     setSelectedChildrenToLink([]);
     setChildrenToMoveInSwap([]);
@@ -742,7 +815,7 @@ const FamilyTreeApp = () => {
 
   const handleEditPerson = async () => {
     if (!validateForm()) {
-      showNotification('Please fix the validation errors before submitting', 'warning');
+      showNotification('Please fix the validation errors before submitting', 'warning', 4000);
       return;
     }
     
@@ -956,7 +1029,7 @@ const FamilyTreeApp = () => {
             4000
           );
         } else {
-          showNotification(`✅ ${editingPerson.fullName} updated successfully`, 'success');
+          showNotification(`✅ ${editingPerson.fullName} updated successfully`, 'success', 4000);
         }
       } else {
         // No new children linked, just update the member normally
@@ -1014,15 +1087,111 @@ const FamilyTreeApp = () => {
         return member;
       });
       
-      showNotification(`✅ ${editingPerson.fullName} is now a root member`, 'success');
+      showNotification(`✅ ${editingPerson.fullName} is now a root member`, 'success', 4000);
     }
     // SCENARIO 4: Regular edit (not involving root changes)
     else {
-      // Not editing root member, update normally
+      // Check if parent has changed
+      const parentChanged = editingPerson.parentId !== formData.parentId;
+      
+      if (parentChanged) {
+        // Parent has changed - need to update both old and new parent's children arrays
+        const oldParentId = editingPerson.parentId;
+        const newParentId = formData.parentId;
+        
+        // Remove from old parent's children array (both main array and from any marriages)
+        if (oldParentId) {
+          updatedMembers = updatedMembers.map(member => {
+            if (member.id === oldParentId) {
+              const updatedMember = {
+                ...member,
+                children: (member.children || []).filter(id => id !== editingPerson.id)
+              };
+              
+              // Also remove from any marriage's children array
+              if (updatedMember.marriages && updatedMember.marriages.length > 0) {
+                updatedMember.marriages = updatedMember.marriages.map(marriage => ({
+                  ...marriage,
+                  children: (marriage.children || []).filter(id => id !== editingPerson.id)
+                }));
+              }
+              
+              return updatedMember;
+            }
+            return member;
+          });
+        }
+        
+        // Add to new parent's children array
+        if (newParentId) {
+          updatedMembers = updatedMembers.map(member => {
+            if (member.id === newParentId) {
+              const existingChildren = member.children || [];
+              if (!existingChildren.includes(editingPerson.id)) {
+                const updatedMember = {
+                  ...member,
+                  children: [...existingChildren, editingPerson.id]
+                };
+                
+                // Determine which marriage to add child to
+                let selectedMarriageIdx = formData.selectedMarriageForChild;
+                
+                // If no marriage selected, auto-detect based on birth dates
+                if (selectedMarriageIdx === null && updatedMember.marriages && updatedMember.marriages.length > 0) {
+                  const childBirthDate = editingPerson.dateOfBirth ? new Date(editingPerson.dateOfBirth) : null;
+                  
+                  if (childBirthDate) {
+                    // Find the marriage that the child was born into
+                    selectedMarriageIdx = updatedMember.marriages.findIndex((marriage, idx) => {
+                      const marriageDate = marriage.dateOfMarriage ? new Date(marriage.dateOfMarriage) : null;
+                      const nextMarriage = updatedMember.marriages[idx + 1];
+                      const nextMarriageDate = nextMarriage?.dateOfMarriage ? new Date(nextMarriage.dateOfMarriage) : null;
+                      
+                      // Child born after this marriage started
+                      if (marriageDate && childBirthDate < marriageDate) return false;
+                      
+                      // Child born before next marriage
+                      if (nextMarriageDate && childBirthDate >= nextMarriageDate) return false;
+                      
+                      return true;
+                    });
+                  }
+                  
+                  // If no marriage found by birth date, use first marriage
+                  if (selectedMarriageIdx === -1) {
+                    selectedMarriageIdx = 0;
+                  }
+                }
+                
+                // Add to the appropriate marriage's children array
+                if (selectedMarriageIdx !== null && updatedMember.marriages && updatedMember.marriages[selectedMarriageIdx]) {
+                  updatedMember.marriages = updatedMember.marriages.map((marriage, idx) => {
+                    if (idx === selectedMarriageIdx) {
+                      const marriageChildren = marriage.children || [];
+                      if (!marriageChildren.includes(editingPerson.id)) {
+                        return {
+                          ...marriage,
+                          children: [...marriageChildren, editingPerson.id]
+                        };
+                      }
+                    }
+                    return marriage;
+                  });
+                }
+                
+                return updatedMember;
+              }
+            }
+            return member;
+          });
+        }
+      }
+      
+      // Update the member itself
       updatedMembers = updatedMembers.map(member => 
         member.id === editingPerson.id ? { ...formData, id: editingPerson.id } : member
       );
-      showNotification(`✅ ${editingPerson.fullName} updated successfully`, 'success');
+      showNotification(`✅ ${editingPerson.fullName} updated successfully`, 'success', 4000);
     }
 
     let updatedData = {
@@ -1037,6 +1206,21 @@ const FamilyTreeApp = () => {
     saveToHistory(familyData, `Edited ${editingPerson.fullName}`);
 
     setFamilyData(updatedData);
+    
+    // Refresh selectedPerson if they're currently being viewed (keep the modal open with updated data)
+    if (selectedPerson && selectedPerson.id === editingPerson.id) {
+      const updatedSelectedPerson = updatedData.members.find(m => m.id === editingPerson.id);
+      if (updatedSelectedPerson) {
+        setSelectedPerson(updatedSelectedPerson);
+      }
+    } else if (selectedPerson) {
+      // If viewing a parent/child of the edited person, refresh their data too
+      const updatedSelected = updatedData.members.find(m => m.id === selectedPerson.id);
+      if (updatedSelected) {
+        setSelectedPerson(updatedSelected);
+      }
+    }
+    
     setShowAddForm(false);
     setEditingPerson(null);
     setSelectedChildrenToLink([]);
@@ -1079,7 +1263,7 @@ const FamilyTreeApp = () => {
     setShowAddForm(false);
     setEditingPerson(null);
     setShowDeleteConfirmation(false);
-    showNotification(`🗑️ ${personToDelete.fullName} removed from family tree`, 'info');
+    showNotification(`🗑️ ${personToDelete.fullName} removed from family tree`, 'info', 4000);
     setPersonToDelete(null);
     resetForm();
     
@@ -1109,13 +1293,14 @@ const FamilyTreeApp = () => {
     if (file) {
       // Validate file type
       if (!file.type.startsWith('image/')) {
-        showNotification('⚠️ Please select an image file', 'error');
+        showNotification('⚠️ Please select an image file', 'error', 4000);
         return;
       }
       
-      // Validate file size (max 5MB)
-      if (file.size > 5 * 1024 * 1024) {
-        showNotification('⚠️ Image must be less than 5MB', 'error');
+      // Validate file size (max 500KB for small files)
+      const MAX_SIZE = 500 * 1024; // 500KB
+      if (file.size > MAX_SIZE) {
+        showNotification('⚠️ Image must be less than 500KB. Please compress or use a smaller image.', 'error');
         return;
       }
       
@@ -1152,8 +1337,23 @@ const FamilyTreeApp = () => {
       height: crop.height * scaleY,
     };
     
-    canvas.width = pixelCrop.width;
-    canvas.height = pixelCrop.height;
+    // Ensure output is always at least 300x300px for good visibility
+    const minSize = 300;
+    const outputSize = Math.max(minSize, pixelCrop.width, pixelCrop.height);
+    
+    canvas.width = outputSize;
+    canvas.height = outputSize;
+    
+    // Fill with white background first
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, outputSize, outputSize);
+    
+    // Calculate scaling to fit image in canvas while maintaining aspect ratio
+    const scale = outputSize / Math.max(pixelCrop.width, pixelCrop.height);
+    const scaledWidth = pixelCrop.width * scale;
+    const scaledHeight = pixelCrop.height * scale;
+    const offsetX = (outputSize - scaledWidth) / 2;
+    const offsetY = (outputSize - scaledHeight) / 2;
     
     ctx.drawImage(
       image,
@@ -1161,13 +1361,13 @@ const FamilyTreeApp = () => {
       pixelCrop.y,
       pixelCrop.width,
       pixelCrop.height,
-      0,
-      0,
-      pixelCrop.width,
-      pixelCrop.height
+      offsetX,
+      offsetY,
+      scaledWidth,
+      scaledHeight
     );
     
-    return canvas.toDataURL('image/jpeg', 0.8);
+    return canvas.toDataURL('image/jpeg', 0.85);
   };
 
   const handleCropComplete = () => {
@@ -1194,7 +1394,7 @@ const FamilyTreeApp = () => {
     document.title = `${adminInfo.familyName} Family Tree`;
     
     // Show success message
-    showNotification('🎉 Setup completed! You can now access /admin to manage your tree', 'success', 5000);
+    showNotification('🎉 Setup completed! You are now logged in as admin', 'success', 5000);
   };
 
   const resetForm = () => {
@@ -1213,6 +1413,7 @@ const FamilyTreeApp = () => {
       birthStar: '',
       nicknames: '',
       parentId: null,
+      isAdopted: false,
       generation: 0,
       photo: null,
       selectedMarriageForChild: null
@@ -1255,54 +1456,83 @@ const FamilyTreeApp = () => {
     setIsLoggingIn(true);
     
     try {
-      const result = await familyTreeService.verifyAdminLogin(
-        adminCredentials.username.trim(), 
-        adminCredentials.password
-      );
+      // Check if we're on root domain or subdomain
+      const currentIsRoot = isRootDomain();
       
-      if (result.success) {
+      if (currentIsRoot) {
+        // On root domain - verify across all families and redirect to subdomain
+        const result = await familyTreeService.verifyAdminLoginAndGetFamily(
+          adminCredentials.username.trim(), 
+          adminCredentials.password
+        );
+        
+        if (!result.success) {
+          // Credentials are wrong - don't redirect
+          const errorMsg = result.error || 'Invalid username or password';
+          setLoginError(errorMsg);
+          showNotification(`❌ ${errorMsg}`, 'error');
+          setAdminCredentials(prev => ({ ...prev, password: '' }));
+          setIsLoggingIn(false);
+          return;
+        }
+        
+        // Credentials are valid - get the family subdomain and redirect
+        const sanitizedSubdomain = result.subdomain.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+        
+        // Determine the family URL based on environment
+        let familyUrl;
+        const currentHost = window.location.hostname;
+        
+        if (currentHost === 'localhost' || currentHost === '127.0.0.1') {
+          // Development environment - use localhost with port
+          const port = window.location.port ? `:${window.location.port}` : '';
+          familyUrl = `http://${sanitizedSubdomain}.localhost${port}`;
+        } else {
+          // Production environment - use familywall.in domain
+          familyUrl = `https://${sanitizedSubdomain}.familywall.in`;
+        }
+        
+        // Encode credentials in URL to pass across subdomains
+        const credentialsParam = btoa(JSON.stringify({
+          username: adminCredentials.username.trim(),
+          password: adminCredentials.password,
+          timestamp: Date.now()
+        }));
+        
+        // Redirect to the family subdomain with credentials in URL
+        window.location.href = `${familyUrl}?auth=${encodeURIComponent(credentialsParam)}`;
+      } else {
+        // On subdomain - verify locally without redirect
+        const result = await familyTreeService.verifyAdminLogin(
+          adminCredentials.username.trim(), 
+          adminCredentials.password
+        );
+        
+        if (!result.success) {
+          const errorMsg = result.error || 'Invalid username or password';
+          setLoginError(errorMsg);
+          showNotification(`❌ ${errorMsg}`, 'error');
+          setAdminCredentials(prev => ({ ...prev, password: '' }));
+          setIsLoggingIn(false);
+          return;
+        }
+        
+        // Login successful on subdomain
         setIsAdmin(true);
         setShowAdminLogin(false);
         setLoginError('');
-        setFamilyNotFound(false); // Reset family not found flag
         
-        // Store admin session with timestamp (expires in 24 hours)
+        // Store admin session
+        const subdomain = getSubdomain();
         const sessionData = {
           isAdmin: true,
           timestamp: Date.now(),
-          subdomain: getSubdomain()
+          subdomain: subdomain
         };
-        sessionStorage.setItem('adminSession', JSON.stringify(sessionData));
-        
-        // Load the family info and tree data after successful login
-        const subdomain = getSubdomain();
-        const familyResult = await familyTreeService.getFamilyBySubdomain(subdomain);
-        
-        if (familyResult.success) {
-          const treeResult = await familyTreeService.loadFamilyTree();
-          if (treeResult.success && treeResult.data) {
-            setFamilyData(treeResult.data);
-          } else {
-            // If no tree data, at least set the family surname
-            setFamilyData({
-              surname: familyResult.family.displayName || familyResult.family.surname || 'Family',
-              members: []
-            });
-          }
-        }
-        
-        // Clear credentials
-        setAdminCredentials({ username: '', password: '' });
+        localStorage.setItem('adminSession', JSON.stringify(sessionData));
         
         showNotification('✅ Successfully logged in as admin', 'success');
-        // Redirect to root path after successful login
-        window.history.pushState({}, '', '/');
-      } else {
-        const errorMsg = result.error || 'Invalid username or password';
-        setLoginError(errorMsg);
-        showNotification(`❌ ${errorMsg}`, 'error');
-        // Clear password on failed attempt
-        setAdminCredentials(prev => ({ ...prev, password: '' }));
+        setAdminCredentials({ username: '', password: '' });
       }
     } catch (error) {
       console.error('Login error:', error);
@@ -1310,7 +1540,6 @@ const FamilyTreeApp = () => {
       setLoginError(errorMsg);
       showNotification(`❌ ${errorMsg}`, 'error');
       setAdminCredentials(prev => ({ ...prev, password: '' }));
-    } finally {
       setIsLoggingIn(false);
     }
   };
@@ -1318,13 +1547,17 @@ const FamilyTreeApp = () => {
   const handleAdminLogout = () => {
     setIsAdmin(false);
     setShowAdminLogin(false);
+    setAdminCredentials({ username: '', password: '' });
+    setLoginError('');
     
-    // Clear admin session
-    sessionStorage.removeItem('adminSession');
+    // Clear admin session from localStorage
+    localStorage.removeItem('adminSession');
     
-    // Redirect to public view
-    window.history.pushState({}, '', '/');
-    window.location.reload();
+    // Show logout notification
+    showNotification('✅ You have been logged out', 'success');
+    
+    // Stay on current page (show public view) instead of reloading
+    // This gives better UX as user can see the family tree in public mode
   };
 
   const removeNotification = useCallback((id) => {
@@ -1347,15 +1580,13 @@ const FamilyTreeApp = () => {
       removeNotification(id);
     }, duration);
   }, [removeNotification]);
-
     const saveToDatabase = useCallback(async (data = familyData) => {
     if (!isAdmin) {
       console.warn('Save attempt by non-admin user');
-      showNotification('Only admins can save changes. Please log in at /admin', 'warning');
+      showNotification('Only admins can save changes. Please use Admin Login in the header', 'warning');
       return;
     }
     
-    console.log('Saving to database:', data);
     showNotification('Saving...', 'info', 1000);
     
     const result = await familyTreeService.saveFamilyTree(data);
@@ -1925,9 +2156,9 @@ const FamilyTreeApp = () => {
     // Calculate responsive layout for mobile and desktop
     const isMobile = window.innerWidth < 768;
     const cardWidth = isMobile ? 200 : 280; // Updated to match new card width
-    const cardSpacing = isMobile ? 40 : 60; // Increased spacing for timeline cards
+    const cardSpacing = isMobile ? 60 : 80; // Increased spacing for better card separation
     const startX = isMobile ? 20 : 50;
-    const generationY = isMobile ? 80 + person.generation * 280 : 100 + person.generation * 320; // More vertical space for timeline layout
+    const generationY = isMobile ? 80 + person.generation * 340 : 100 + person.generation * 380; // Increased vertical spacing between generations
     
     // Simple horizontal positioning - arrange people in each generation side by side
     // but keep family groups together and sort children within families by birth date
@@ -1983,7 +2214,7 @@ const FamilyTreeApp = () => {
         transition={{ duration: 0.3 }}
       >
         {/* Professional Timeline Card Layout */}
-        <div className={`${theme.cardBg} border-l-4 ${isMale ? 'border-blue-500' : 'border-pink-500'} rounded-lg shadow-xl hover:shadow-2xl h-full flex flex-col backdrop-blur-sm relative overflow-hidden transition-shadow duration-300`}>
+        <div className={`${theme.cardBg} border-l-4 ${isMale ? 'border-blue-500' : 'border-pink-500'} rounded-lg shadow-2xl hover:shadow-[0_25px_50px_-12px_rgba(0,0,0,0.4)] h-full flex flex-col backdrop-blur-sm relative overflow-hidden transition-all duration-300`}>
           {/* Header with Gender Indicator & Edit Button */}
           <div className={`${isMale ? 'bg-gradient-to-r from-blue-500 to-blue-600' : 'bg-gradient-to-r from-pink-500 to-pink-600'} px-4 py-2 flex justify-between items-center`}>
             <div className="flex items-center gap-2">
@@ -2205,8 +2436,8 @@ const FamilyTreeApp = () => {
         const totalInGeneration = generationLayout.length;
         
         const isMobile = window.innerWidth < 768;
-        const cardWidth = isMobile ? 180 : 240;
-        const cardSpacing = isMobile ? 20 : 30;
+        const cardWidth = isMobile ? 200 : 280;
+        const cardSpacing = isMobile ? 60 : 80;
         const startX = isMobile ? 20 : 50;
         
         let horizontalPosition;
@@ -2214,7 +2445,7 @@ const FamilyTreeApp = () => {
           horizontalPosition = isMobile ? startX + 200 : startX + 400;
         } else {
           const totalWidth = totalInGeneration * cardWidth;
-          const containerWidth = isMobile ? window.innerWidth - 40 : 1400;
+          const containerWidth = isMobile ? window.innerWidth - 40 : 1600;
           const spacingAdjustment = Math.max(0, (containerWidth - totalWidth) / (totalInGeneration + 1));
           horizontalPosition = startX + spacingAdjustment + (positionInGeneration * (cardWidth + cardSpacing));
         }
@@ -2223,13 +2454,13 @@ const FamilyTreeApp = () => {
       };
       
       const isMobile = window.innerWidth < 768;
-      const cardWidth = isMobile ? 180 : 240;
+      const cardWidth = isMobile ? 200 : 280;
       const cardHeight = isMobile ? 180 : 200;
       const gap = 15;
       
       // Get parent position (center bottom of card)
       const parentX = calculatePositionForPerson(parent) + cardWidth / 2;
-      const parentY = (isMobile ? 80 + parent.generation * 240 : 100 + parent.generation * 260) + cardHeight;
+      const parentY = (isMobile ? 80 + parent.generation * 340 : 100 + parent.generation * 380) + cardHeight;
       const adjustedParentY = parentY + gap;
       
       if (children.length === 1) {
@@ -2249,8 +2480,9 @@ const FamilyTreeApp = () => {
               x2={parentX}
               y2={midY}
               stroke={theme.connection}
-              strokeWidth="2.5"
-              opacity="0.8"
+              strokeWidth="3"
+              opacity="0.9"
+              strokeLinecap="round"
             />
             {/* Horizontal line */}
             <line
@@ -2259,8 +2491,9 @@ const FamilyTreeApp = () => {
               x2={childX}
               y2={midY}
               stroke={theme.connection}
-              strokeWidth="2.5"
-              opacity="0.8"
+              strokeWidth="3"
+              opacity="0.9"
+              strokeLinecap="round"
             />
             {/* Vertical line to child with arrow */}
             <line
@@ -2269,8 +2502,9 @@ const FamilyTreeApp = () => {
               x2={childX}
               y2={adjustedChildY}
               stroke={theme.connection}
-              strokeWidth="2.5"
-              opacity="0.8"
+              strokeWidth="3"
+              opacity="0.9"
+              strokeLinecap="round"
               markerEnd="url(#arrowhead)"
             />
           </g>
@@ -2280,7 +2514,7 @@ const FamilyTreeApp = () => {
         const childPositions = children.map(child => ({
           child,
           x: calculatePositionForPerson(child) + cardWidth / 2,
-          y: isMobile ? 80 + child.generation * 240 : 100 + child.generation * 260
+          y: isMobile ? 80 + child.generation * 340 : 100 + child.generation * 380
         }));
         
         // Find leftmost and rightmost children
@@ -2297,8 +2531,9 @@ const FamilyTreeApp = () => {
             x2={parentX}
             y2={branchY}
             stroke={theme.connection}
-            strokeWidth="2.5"
-            opacity="0.8"
+            strokeWidth="3"
+            opacity="0.9"
+            strokeLinecap="round"
           />
         );
         
@@ -2311,8 +2546,9 @@ const FamilyTreeApp = () => {
             x2={maxX}
             y2={branchY}
             stroke={theme.connection}
-            strokeWidth="2.5"
-            opacity="0.8"
+            strokeWidth="3"
+            opacity="0.9"
+            strokeLinecap="round"
           />
         );
         
@@ -2329,8 +2565,9 @@ const FamilyTreeApp = () => {
                 x2={x}
                 y2={adjustedChildY}
                 stroke={theme.connection}
-                strokeWidth="2.5"
-                opacity="0.8"
+                strokeWidth="3"
+                opacity="0.9"
+                strokeLinecap="round"
                 markerEnd="url(#arrowhead)"
               />
             </g>
@@ -2629,17 +2866,7 @@ const FamilyTreeApp = () => {
     );
   }
 
-  // Show landing page on root domain
-  if (isRootDomain() && window.location.pathname !== '/register') {
-    return <LandingPage />;
-  }
-
-  // Show registration page on /register route
-  if (needsInitialSetup) {
-    return <InitialSetup onSetupComplete={handleSetupComplete} />;
-  }
-
-  // Admin Login Modal
+  // Admin Login Modal - Check this BEFORE landing page
   if (showAdminLogin) {
     return (
       <div className={`w-full min-h-screen h-screen bg-gradient-to-b ${theme.header} flex items-center justify-center overflow-auto p-4 relative`}>
@@ -2670,10 +2897,11 @@ const FamilyTreeApp = () => {
           
           <form onSubmit={handleAdminLogin} className="space-y-5">
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
+              <label htmlFor="admin-username" className="block text-sm font-semibold text-gray-700 mb-2">
                 Username <span className="text-red-500">*</span>
               </label>
               <input
+                id="admin-username"
                 type="text"
                 value={adminCredentials.username}
                 onChange={(e) => setAdminCredentials({...adminCredentials, username: e.target.value})}
@@ -2686,10 +2914,11 @@ const FamilyTreeApp = () => {
             </div>
             
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
+              <label htmlFor="admin-password" className="block text-sm font-semibold text-gray-700 mb-2">
                 Password <span className="text-red-500">*</span>
               </label>
               <input
+                id="admin-password"
                 type="password"
                 value={adminCredentials.password}
                 onChange={(e) => setAdminCredentials({...adminCredentials, password: e.target.value})}
@@ -2749,8 +2978,7 @@ const FamilyTreeApp = () => {
               onClick={() => {
                 setShowAdminLogin(false);
                 setAdminCredentials({ username: '', password: '' });
-                window.history.pushState({}, '', '/');
-                window.location.reload();
+                setLoginError('');
               }}
               disabled={isLoggingIn}
               className="text-amber-600 hover:text-amber-800 text-sm font-medium block w-full text-center transition-colors"
@@ -2805,6 +3033,16 @@ const FamilyTreeApp = () => {
         </div>
       </div>
     );
+  }
+
+  // Show landing page on root domain
+  if (isRootDomain() && window.location.pathname !== '/register') {
+    return <LandingPage onAdminLoginClick={() => setShowAdminLogin(true)} />;
+  }
+
+  // Show registration page on /register route
+  if (needsInitialSetup) {
+    return <InitialSetup onSetupComplete={handleSetupComplete} />;
   }
 
   if (scene === 'entry') {
@@ -3000,11 +3238,11 @@ const FamilyTreeApp = () => {
         }}></div>
       </div>
 
-      <div className={`absolute top-0 left-0 right-0 bg-gradient-to-r ${theme.header} ${theme.headerText} p-3 sm:p-6 shadow-2xl z-30 border-b-4 ${theme.headerBorder} backdrop-blur-sm`}>
+      <div className={`absolute top-0 left-0 right-0 bg-gradient-to-r ${theme.header} ${theme.headerText} p-2 sm:p-4 lg:p-6 shadow-2xl z-30 border-b-4 ${theme.headerBorder} backdrop-blur-sm`}>
         {/* Header with enhanced styling */}
         <div className={`absolute inset-0 bg-gradient-to-r ${theme.header.replace('900', '800')}/50`}></div>
-        <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-2 sm:gap-4 max-w-7xl mx-auto relative z-10">
-          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-6 max-w-7xl mx-auto relative z-10">
+          <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
             {showSurnameEdit ? (
               <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                 <input
@@ -3063,31 +3301,40 @@ const FamilyTreeApp = () => {
             )}
           </div>
           
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-3 justify-center sm:justify-end">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-4 justify-start sm:justify-end w-full sm:w-auto">
 
-            {/* Public View - Show Login and Get Started Free buttons */}
+            {/* Mobile Menu Button */}
+            {!isAdmin && (
+              <button
+                onClick={() => setShowMobileMenu(!showMobileMenu)}
+                className="md:hidden p-2 text-white hover:bg-white/20 rounded-lg transition-all ml-auto"
+                title="Menu"
+              >
+                <Menu size={24} />
+              </button>
+            )}
+
+            {/* Desktop View - Show Login and Get Started Free buttons */}
             {!isAdmin && (
               <>
                 <motion.button
                   onClick={() => setShowAdminLogin(true)}
-                  className="px-4 sm:px-6 py-2 sm:py-2.5 bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-semibold rounded-lg transition-all duration-300 flex items-center gap-2 border border-white/30 hover:border-white/50 shadow-lg"
+                  className="hidden md:flex px-6 py-2.5 bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-semibold rounded-lg transition-all duration-300 items-center gap-2 border border-white/30 hover:border-white/50 shadow-lg"
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                 >
                   <LogIn size={18} />
-                  <span className="hidden sm:inline">Admin Login</span>
-                  <span className="sm:hidden">Login</span>
+                  <span>Admin Login</span>
                 </motion.button>
                 
                 <motion.a
                   href={getRootDomainUrl()}
-                  className="px-4 sm:px-6 py-2 sm:py-2.5 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold rounded-lg transition-all duration-300 flex items-center gap-2 shadow-lg border border-green-400"
+                  className="hidden md:flex px-6 py-2.5 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold rounded-lg transition-all duration-300 items-center gap-2 shadow-lg border border-green-400"
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                 >
                   <Sparkles size={18} />
-                  <span className="hidden sm:inline">Get Started Free</span>
-                  <span className="sm:hidden">Get Started</span>
+                  <span>Get Started Free</span>
                 </motion.a>
               </>
             )}
@@ -3095,6 +3342,34 @@ const FamilyTreeApp = () => {
             {/* All action buttons moved to bottom-right floating controls for better accessibility */}
 
           </div>
+
+          {/* Mobile Menu Dropdown */}
+          {!isAdmin && showMobileMenu && (
+            <motion.div
+              initial={{ opacity: 0, y: -15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              transition={{ duration: 0.2 }}
+              className="md:hidden w-full mt-3 p-4 bg-white/15 backdrop-blur-md rounded-xl border border-white/30 space-y-3 shadow-xl"
+            >
+              <button
+                onClick={() => {
+                  setShowAdminLogin(true);
+                  setShowMobileMenu(false);
+                }}
+                className="w-full px-4 py-3 bg-white/25 hover:bg-white/35 text-white font-semibold rounded-lg transition-all flex items-center justify-center gap-2 shadow-lg"
+              >
+                <LogIn size={18} />
+                Admin Login
+              </button>
+              <a
+                href={getRootDomainUrl()}
+                className="w-full block px-4 py-3 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold rounded-lg transition-all text-center shadow-lg"
+              >
+                Get Started Free
+              </a>
+            </motion.div>
+          )}
         </div>
       </div>
 
@@ -3529,10 +3804,12 @@ const FamilyTreeApp = () => {
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div className={`bg-white p-3 rounded-lg border-2 ${theme.cardBorder}`}>
-                  <p className={`text-sm ${theme.textLight} font-semibold mb-1`}>Date of Birth</p>
-                  <p className={`${theme.text} font-bold`}>{new Date(selectedPerson.dateOfBirth).toLocaleDateString()}</p>
-                </div>
+                {selectedPerson.dateOfBirth && (
+                  <div className={`bg-white p-3 rounded-lg border-2 ${theme.cardBorder}`}>
+                    <p className={`text-sm ${theme.textLight} font-semibold mb-1`}>Date of Birth</p>
+                    <p className={`${theme.text} font-bold`}>{new Date(selectedPerson.dateOfBirth).toLocaleDateString()}</p>
+                  </div>
+                )}
 
                 {!selectedPerson.isLiving && (
                   <div className={`bg-white p-3 rounded-lg border-2 ${theme.cardBorder}`}>
@@ -3548,19 +3825,44 @@ const FamilyTreeApp = () => {
                   </div>
                 )}
 
-                <div className={`bg-white p-3 rounded-lg border-2 ${theme.cardBorder}`}>
-                  <p className={`text-sm ${theme.textLight} font-semibold mb-1`}>Birth Star</p>
-                  <p className={`${theme.text} font-bold flex items-center gap-2`}>
-                    <Star size={16} className="text-yellow-600" />
-                    {selectedPerson.birthStar || 'Not specified'}
-                  </p>
-                </div>
+                {selectedPerson.birthStar && (
+                  <div className={`bg-white p-3 rounded-lg border-2 ${theme.cardBorder}`}>
+                    <p className={`text-sm ${theme.textLight} font-semibold mb-1`}>Birth Star</p>
+                    <p className={`${theme.text} font-bold flex items-center gap-2`}>
+                      <Star size={16} className="text-yellow-600" />
+                      {selectedPerson.birthStar}
+                    </p>
+                  </div>
+                )}
 
                 {selectedPerson.nicknames && (
                   <div className={`bg-white p-3 rounded-lg border-2 ${theme.cardBorder}`}>
                     <p className={`text-sm ${theme.textLight} font-semibold mb-1`}>Nicknames</p>
                     <p className={`${theme.text} font-bold`}>{selectedPerson.nicknames}</p>
                   </div>
+                )}
+
+                {/* Parent Info - Show if not root member */}
+                {selectedPerson.parentId ? (
+                  (() => {
+                    const parent = familyData.members.find(m => m.id === selectedPerson.parentId);
+                    if (parent) {
+                      return (
+                        <div className={`bg-blue-50 p-3 rounded-lg border-2 border-blue-300`}>
+                          <p className={`text-sm text-blue-700 font-semibold mb-1`}>Parent</p>
+                          <p className={`${theme.text} font-bold`}>{parent.fullName}</p>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()
+                ) : (
+                  familyData.members.length > 0 && (
+                    <div className={`bg-purple-50 p-3 rounded-lg border-2 border-purple-300`}>
+                      <p className={`text-sm text-purple-700 font-semibold mb-1`}>Status</p>
+                      <p className={`text-purple-900 font-bold`}>🌳 Root Member (Family Head)</p>
+                    </div>
+                  )
                 )}
               </div>
 
@@ -3640,29 +3942,24 @@ const FamilyTreeApp = () => {
                         </div>
                       ))}
                       
-                      {/* Show any unassigned children (legacy data) */}
+                      {/* Show any unassigned children (no parent assigned) */}
                       {(() => {
-                        const assignedChildren = new Set();
-                        getMarriages(selectedPerson).forEach(m => {
-                          (m.children || []).forEach(childId => assignedChildren.add(childId));
-                        });
-                        const unassignedChildren = (selectedPerson.children || [])
-                          .filter(childId => !assignedChildren.has(childId))
-                          .map(childId => {
-                            const child = familyData.members.find(m => m.id === childId);
-                            return child ? { name: child.fullName, dob: child.dateOfBirth } : null;
-                          }).filter(Boolean);
+                        // Children WITH parents should not appear here
+                        const childrenWithoutParents = (selectedPerson.children || [])
+                          .map(childId => familyData.members.find(m => m.id === childId))
+                          .filter(child => child && !child.parentId) // Only children WITHOUT a parent
+                          .map(child => ({ name: child.fullName, dob: child.dateOfBirth }));
                         
-                        if (unassignedChildren.length > 0) {
+                        if (childrenWithoutParents.length > 0) {
                           return (
-                            <div className="bg-gray-50 p-3 rounded border border-gray-200">
-                              <p className="font-semibold text-gray-800 text-sm mb-2">Other children:</p>
+                            <div className="bg-yellow-50 p-3 rounded border border-yellow-200">
+                              <p className="font-semibold text-yellow-800 text-sm mb-2">⚠️ Unassigned Children (no parent set):</p>
                               <div className="space-y-2">
-                                {unassignedChildren.map((child, childIdx) => (
-                                  <div key={childIdx} className="pl-3 border-l-2 border-gray-300">
-                                    <p className="font-medium text-gray-900 text-sm">{child.name}</p>
+                                {childrenWithoutParents.map((child, childIdx) => (
+                                  <div key={childIdx} className="pl-3 border-l-2 border-yellow-300">
+                                    <p className="font-medium text-yellow-900 text-sm">{child.name}</p>
                                     {child.dob && (
-                                      <p className="text-xs text-gray-700">Born: {new Date(child.dob).toLocaleDateString()}</p>
+                                      <p className="text-xs text-yellow-700">Born: {new Date(child.dob).toLocaleDateString()}</p>
                                     )}
                                   </div>
                                 ))}
@@ -3728,8 +4025,8 @@ const FamilyTreeApp = () => {
                     <Camera size={20} />
                     Profile Photo
                   </h4>
-                  <div className="flex items-center gap-6">
-                    <div className={`relative w-24 h-24 rounded-full overflow-hidden border-4 ${theme.cardBorder} shadow-lg shrink-0 bg-white/10`}>
+                  <div className="flex items-start gap-4 sm:gap-6">
+                    <div className={`relative w-20 h-20 sm:w-24 sm:h-24 bg-gray-200 rounded-full overflow-hidden border-4 ${theme.cardBorder} shadow-lg shrink-0`}>
                       {croppedImage || formData.photo ? (
                         <img 
                           src={croppedImage || formData.photo} 
@@ -3738,21 +4035,21 @@ const FamilyTreeApp = () => {
                           style={{ objectPosition: 'center' }}
                         />
                       ) : (
-                        <div className="absolute inset-0 w-full h-full bg-gradient-to-br from-purple-300/40 to-purple-500/40 flex items-center justify-center backdrop-blur-sm">
-                          <Camera size={32} className="text-purple-700" />
+                        <div className="absolute inset-0 w-full h-full bg-gradient-to-br from-gray-300 to-gray-400 flex items-center justify-center">
+                          <Camera size={24} className="text-gray-600" />
                         </div>
                       )}
                     </div>
-                    <div className="flex-1">
-                      <div className="flex gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex gap-2 sm:gap-3 items-start flex-wrap">
                         <label className="cursor-pointer inline-block">
                           <motion.div 
-                            className="px-4 sm:px-6 py-2 sm:py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all flex items-center gap-2 shadow-lg font-semibold"
+                            className="px-4 sm:px-6 py-2 sm:py-3 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-lg sm:rounded-xl transition-all flex items-center gap-2 shadow-lg font-bold text-xs sm:text-sm whitespace-nowrap hover:shadow-xl"
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}
                           >
-                            <Upload size={20} />
-                            {croppedImage || formData.photo ? 'Change Photo' : 'Upload Photo'}
+                            <Upload size={18} />
+                            Upload
                           </motion.div>
                           <input
                             type="file"
@@ -3767,16 +4064,18 @@ const FamilyTreeApp = () => {
                               setCroppedImage(null);
                               updateFormData({ ...formData, photo: null });
                             }}
-                            className="px-3 sm:px-4 py-2 sm:py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-all flex items-center gap-2 shadow-lg"
+                            className="px-3 sm:px-4 py-2 sm:py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg sm:rounded-xl transition-all flex items-center gap-2 shadow-lg font-bold text-xs sm:text-sm hover:shadow-xl"
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}
                           >
-                            <X size={18} className="sm:w-5 sm:h-5" />
+                            <X size={16} />
                             Remove
                           </motion.button>
                         )}
                       </div>
-                      <p className={`${theme.textLight} text-sm mt-2`}>Upload a photo to personalize the profile. It will be automatically cropped to fit.</p>
+                      <p className={`${theme.textLight} text-xs mt-3 leading-relaxed`}>
+                        📸 Recommended: 300x300px to 500x500px, Square format, Max 500KB
+                      </p>
                     </div>
                   </div>
                 </motion.div>
@@ -3814,10 +4113,29 @@ const FamilyTreeApp = () => {
                       )}
                     </div>
 
+                    {/* Adopted Checkbox */}
+                    {familyData.members.length > 0 && (
+                      <div className="flex items-center gap-3 p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl border-2 border-blue-200">
+                        <input
+                          type="checkbox"
+                          id="isAdopted"
+                          checked={formData.isAdopted}
+                          onChange={(e) => updateFormData({ ...formData, isAdopted: e.target.checked })}
+                          className="w-5 h-5 cursor-pointer"
+                        />
+                        <label htmlFor="isAdopted" className={`${theme.text} font-semibold cursor-pointer flex-1`}>
+                          Adopted?
+                        </label>
+                        <span className={`text-xs ${formData.isAdopted ? 'text-green-600' : 'text-gray-600'} font-medium`}>
+                          {formData.isAdopted ? '✓ Yes' : 'No'}
+                        </span>
+                      </div>
+                    )}
+
                     {/* Parent Selection - First Thing After Name */}
                     <div>
                       <label className={`block ${theme.text} font-semibold mb-2`}>
-                        Father (Parent) {familyData.members.length > 0 ? '*' : '(Optional for first member)'}
+                        Parent {familyData.members.length > 0 ? '*' : '(Optional for first member)'}
                       </label>
                       <select
                         value={formData.parentId || ''}
@@ -3825,7 +4143,7 @@ const FamilyTreeApp = () => {
                           const parentId = e.target.value ? parseInt(e.target.value) : null;
                           const parent = familyData.members.find(m => m.id === parentId);
                           
-                          // Automatically set generation and potentially mother
+                          // Automatically set generation and potentially spouse
                           updateFormData({ 
                             ...formData, 
                             parentId,
@@ -3837,7 +4155,23 @@ const FamilyTreeApp = () => {
                       >
                         <option value="">No parent (Root member)</option>
                         {familyData.members
-                          .filter(member => member.id !== editingPerson?.id && member.gender === 'male')
+                          .filter(member => {
+                            // Don't show the person being edited
+                            if (member.id === editingPerson?.id) return false;
+                            
+                            // If adopted, show ALL members as potential parents
+                            if (formData.isAdopted) return true;
+                            
+                            // If NOT adopted (biological), show members with:
+                            // - Marriages (coupled) OR
+                            // - Marital status of 'married' OR
+                            // - Spouse name set
+                            const hasMarriages = (member.marriages && member.marriages.length > 0);
+                            const isMarried = member.maritalStatus === 'married';
+                            const hasSpouseName = member.spouseName && member.spouseName.trim().length > 0;
+                            
+                            return hasMarriages || isMarried || hasSpouseName;
+                          })
                           .map(member => (
                             <option key={member.id} value={member.id}>
                               {member.fullName} (Gen {member.generation})
@@ -3846,16 +4180,16 @@ const FamilyTreeApp = () => {
                       </select>
                     </div>
 
-                    {/* Mother Selection - Only if father has multiple marriages */}
+                    {/* Spouse Selection - Only if parent has multiple marriages */}
                     {formData.parentId && (() => {
-                      const father = familyData.members.find(m => m.id === formData.parentId);
-                      const fatherMarriages = father ? getMarriages(father) : [];
+                      const parent = familyData.members.find(m => m.id === formData.parentId);
+                      const parentMarriages = parent ? getMarriages(parent) : [];
                       
-                      if (fatherMarriages.length > 1) {
+                      if (parentMarriages.length > 1) {
                         return (
                           <div>
                             <label className={`block ${theme.text} font-semibold mb-2`}>
-                              Mother * (Father has {fatherMarriages.length} marriages)
+                              Spouse * ({parent.fullName} has {parentMarriages.length} marriages)
                             </label>
                             <select
                               value={formData.selectedMarriageForChild || ''}
@@ -3872,8 +4206,8 @@ const FamilyTreeApp = () => {
                                   : `${theme.cardBorder} focus:ring-2 focus:ring-opacity-50 bg-white`
                               }`}
                             >
-                              <option value="">Select Mother</option>
-                              {fatherMarriages.map((marriage, idx) => (
+                              <option value="">Select Spouse</option>
+                              {parentMarriages.map((marriage, idx) => (
                                 <option key={idx} value={idx}>
                                   {marriage.spouseName} (Married: {marriage.dateOfMarriage ? new Date(marriage.dateOfMarriage).getFullYear() : 'Unknown'})
                                 </option>
@@ -3902,8 +4236,8 @@ const FamilyTreeApp = () => {
                           onChange={(e) => updateFormData({ ...formData, gender: e.target.value })}
                           className={`w-full p-3 sm:p-4 border-2 ${theme.cardBorder} rounded-xl focus:ring-2 focus:ring-opacity-50 focus:outline-none bg-white`}
                         >
-                          <option value="male">Male (Blue Square)</option>
-                          <option value="female">Female (Pink Circle)</option>
+                          <option value="male">Male (Blue)</option>
+                          <option value="female">Female (Pink)</option>
                         </select>
                       </div>
 
@@ -4214,7 +4548,6 @@ const FamilyTreeApp = () => {
                       birthDate: 'Add Birth Date',
                       birthStar: 'Add Birth Star',
                       nicknames: 'Add Nicknames',
-                      parent: 'Add Parent / Make Root',
                     }).map(([key, label]) => (
                       <div key={key} className={`flex items-center justify-between p-3 bg-white rounded-xl border ${theme.cardBorder}`}>
                         <span className={`${theme.text} font-medium text-sm sm:text-base`}>{label}</span>
@@ -4320,36 +4653,6 @@ const FamilyTreeApp = () => {
                           className={`w-full p-3 sm:p-4 border-2 ${theme.cardBorder} rounded-xl focus:ring-2 focus:ring-opacity-50 focus:outline-none bg-white`}
                           placeholder="Any nicknames or pet names"
                         />
-                      </motion.div>
-                    )}
-
-                    {/* Parent selection - always optional now */}
-                    {showOptionalFields.parent && (
-                      <motion.div 
-                        className="mb-4"
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                      >
-                        <label className={`block ${theme.text} font-semibold mb-2`}>Parent</label>
-                        <select
-                          value={formData.parentId || ''}
-                          onChange={(e) => {
-                            const parentId = e.target.value ? parseInt(e.target.value) : null;
-                            const parent = familyData.members.find(m => m.id === parentId);
-                            updateFormData({ 
-                              ...formData, 
-                              parentId,
-                              generation: parent ? parent.generation + 1 : 0
-                            });
-                          }}
-                          className={`w-full p-3 sm:p-4 border-2 ${theme.cardBorder} rounded-xl focus:ring-2 focus:ring-opacity-50 focus:outline-none bg-white`}
-                        >
-                          <option value="">No parent (root member)</option>
-                          {familyData.members.filter(member => member.id !== editingPerson?.id).map(member => (
-                            <option key={member.id} value={member.id}>{member.fullName}</option>
-                          ))}
-                        </select>
                       </motion.div>
                     )}
 
@@ -4702,51 +5005,62 @@ const FamilyTreeApp = () => {
               transition={{ duration: 0.2 }}
             >
               {/* Header */}
-              <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <div className="flex items-center justify-between p-4 border-b-2 border-blue-300 bg-gradient-to-r from-blue-600 to-blue-700">
                 <div>
-                  <h3 className="text-xl font-bold text-gray-800">Crop Your Photo</h3>
-                  <p className="text-sm text-gray-500 mt-1">Drag to select the area you want to keep</p>
+                  <h3 className="text-xl font-bold text-white">📸 Crop Your Photo</h3>
+                  <p className="text-sm text-blue-100 mt-1">Drag the selection to frame the face/head area</p>
                 </div>
                 <button
                   onClick={() => {
                     setShowImageCrop(false);
                     setImageToCrop(null);
                   }}
-                  className="text-gray-400 hover:text-gray-600 p-2 hover:bg-gray-100 rounded-lg transition-all"
+                  className="text-blue-100 hover:text-white p-2 hover:bg-blue-500 rounded-lg transition-all"
                 >
                   <X size={20} />
                 </button>
               </div>
               
               {/* Crop Area */}
-              <div className="flex-1 overflow-auto p-4 bg-gray-50">
-                <div className="flex items-center justify-center min-h-full">
-                  <ReactCrop
-                    crop={crop}
-                    onChange={(newCrop) => setCrop(newCrop)}
-                    aspect={1}
-                    circularCrop={false}
-                    minWidth={50}
-                    minHeight={50}
-                    keepSelection
-                  >
-                    <img 
-                      src={imageToCrop} 
-                      alt="Crop preview" 
-                      className="max-w-full max-h-[calc(90vh-250px)] w-auto h-auto"
-                      style={{ display: 'block', margin: '0 auto' }}
-                    />
-                  </ReactCrop>
+              <div className="flex-1 overflow-auto p-6 bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
+                <div className="flex flex-col items-center gap-4">
+                  <div className="relative">
+                    <ReactCrop
+                      crop={crop}
+                      onChange={(newCrop) => setCrop(newCrop)}
+                      aspect={1}
+                      circularCrop={false}
+                      minWidth={100}
+                      minHeight={100}
+                      keepSelection
+                    >
+                      <img 
+                        src={imageToCrop} 
+                        alt="Crop preview" 
+                        className="max-w-full max-h-[calc(90vh-300px)] w-auto h-auto rounded-lg shadow-md border-4 border-blue-200"
+                        style={{ display: 'block', margin: '0 auto' }}
+                      />
+                    </ReactCrop>
+                  </div>
+                  <div className="text-center text-sm text-gray-600">
+                    <p>✂️ Select a square area that captures face/shoulders</p>
+                  </div>
                 </div>
               </div>
               
               {/* Info and Actions */}
               <div className="p-4 border-t border-gray-200 bg-white">
-                <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg mb-4">
-                  <p className="text-xs text-blue-800 flex items-center gap-2">
-                    <Camera size={14} />
-                    <span>Click and drag to select area. The image will be cropped to a square (1:1 ratio).</span>
+                <div className="bg-gradient-to-r from-blue-50 to-cyan-50 border-l-4 border-blue-500 p-4 rounded-lg mb-4">
+                  <p className="text-sm text-blue-900 font-medium flex items-center gap-2 mb-2">
+                    <Check size={16} className="text-green-600" />
+                    <span>Pro Tips:</span>
                   </p>
+                  <ul className="text-xs text-blue-800 space-y-1 ml-6">
+                    <li>• Center the face in the square</li>
+                    <li>• Include shoulders for better framing</li>
+                    <li>• Avoid too much background</li>
+                    <li>• The circle will auto-center your cropped image</li>
+                  </ul>
                 </div>
                 
                 <div className="flex gap-3">
@@ -4755,17 +5069,17 @@ const FamilyTreeApp = () => {
                       setShowImageCrop(false);
                       setImageToCrop(null);
                     }}
-                    className="flex-1 bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2.5 px-4 rounded-lg transition-all flex items-center justify-center gap-2"
+                    className="flex-1 bg-gradient-to-r from-gray-400 to-gray-500 hover:from-gray-500 hover:to-gray-600 text-white font-bold py-3 px-4 rounded-lg transition-all flex items-center justify-center gap-2 shadow-md"
                   >
                     <X size={18} />
                     Cancel
                   </button>
                   <button
                     onClick={handleCropComplete}
-                    className="flex-1 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-semibold py-2.5 px-4 rounded-lg transition-all flex items-center justify-center gap-2 shadow-md"
+                    className="flex-1 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-bold py-3 px-4 rounded-lg transition-all flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
                   >
                     <Check size={18} />
-                    Apply & Save
+                    ✓ Apply & Save
                   </button>
                 </div>
               </div>

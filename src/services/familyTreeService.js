@@ -193,6 +193,51 @@ export const familyTreeService = {
     }
   },
 
+  // Verify admin login from root domain and get family subdomain
+  verifyAdminLoginAndGetFamily: async (username, password) => {
+    try {
+      // Query all families to find which one has this admin
+      const { data: families, error: familiesError } = await supabase
+        .from('families')
+        .select('id, surname, display_name, subdomain');
+
+      if (familiesError) {
+        console.error('Error fetching families:', familiesError);
+        return { success: false, error: 'Database error' };
+      }
+
+      if (!families || families.length === 0) {
+        return { success: false, error: 'No families found' };
+      }
+
+      // Try to verify credentials against each family subdomain
+      for (const family of families) {
+        const { data, error } = await supabase
+          .rpc('verify_admin_login', {
+            login_subdomain: family.subdomain,
+            login_username: username,
+            login_password: password
+          });
+
+        if (!error && data && data.success) {
+          // Found the correct family and verified credentials
+          return { 
+            success: true, 
+            subdomain: family.subdomain,
+            user: data.user, 
+            family: family
+          };
+        }
+      }
+
+      // No family matched the credentials
+      return { success: false, error: 'Invalid username or password' };
+    } catch (error) {
+      console.error('❌ Error verifying admin login from root:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
   // Get shareable link for current family
   getShareableLink: () => {
     return window.location.origin;
